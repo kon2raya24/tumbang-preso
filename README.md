@@ -2,7 +2,7 @@
 
 The Filipino street game, in 3D. It's five o'clock on a barangay street: the sari-sari store, the banderitas, the electric posts, the jeepney parked at the end. The kids are playing **tumbang preso** until Nanay calls everyone home to eat at six.
 
-**Play:** https://tumbang-preso.vercel.app
+**Play:** https://tumbang-preso-3d.vercel.app
 
 ## How to play
 
