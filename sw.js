@@ -1,6 +1,6 @@
 // Offline play: the game's own files (three.js included) are cached on install and served
 // cache-first; the webfont is cached the first time it loads. Bump VERSION whenever a file changes.
-const VERSION = 'tumbangpreso-v2';
+const VERSION = 'tumbangpreso-v3';
 const ASSETS = [
   './', 'index.html', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
