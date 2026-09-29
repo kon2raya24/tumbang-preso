@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tumbang Preso</title>
+<meta name="description" content="The Filipino street game in 3D: throw your tsinelas, knock down the lata, and run home before the taya tags you. Play until Nanay calls you home at six.">
+<meta property="og:title" content="Tumbang Preso: the street game, in 3D">
+<meta property="og:description" content="Knock down the lata with your tsinelas, fetch it back before the taya tags you, and play until Nanay calls.">
+<meta property="og:image" content="https://tumbang-preso.vercel.app/og.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#2a1d2a">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Tumbang Preso">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+:root { --ink: #fff8e1; --muted: #e8d8c8; --gold: #ffd23f; --red: #e8384f; --pink: #ff8ae2; color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #2a1d2a; color: var(--ink); font: 16px/1.4 "Baloo 2", system-ui, -apple-system, "Segoe UI", sans-serif; }
+.stage { position: fixed; inset: 0; touch-action: none; user-select: none; -webkit-user-select: none; }
+#view { display: block; width: 100%; height: 100%; }
+[hidden] { display: none !important; }
+/* the HUD */
+#hud { position: absolute; inset: 0; pointer-events: none; }
+.hud-top { position: absolute; top: max(10px, env(safe-area-inset-top)); left: 12px; right: 12px; display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.chip { background: rgba(20, 14, 24, .62); border: 2px solid rgba(255, 210, 63, .35); border-radius: 14px; padding: 4px 12px; backdrop-filter: blur(4px); }
+.chip small { display: block; font-size: 11px; letter-spacing: .08em; color: var(--muted); line-height: 1.1; }
+.chip b { font-size: 22px; line-height: 1.1; color: var(--gold); }
+#clock.late { color: #ff8a6a; }
+#role { font-weight: 800; font-size: 15px; letter-spacing: .04em; }
+#role.taya { background: rgba(232, 56, 79, .85); border-color: #ffb3b3; }
+#prompt { position: absolute; left: 50%; bottom: calc(max(14px, env(safe-area-inset-bottom)) + 8px); transform: translateX(-50%); background: rgba(20, 14, 24, .62); border-radius: 12px; padding: 5px 14px; font-weight: 700; font-size: 15px; text-align: center; max-width: 92vw; }
+#prompt:empty { display: none; }
+body.touch #prompt { bottom: 150px; font-size: 13px; }
+#meter { position: absolute; left: 50%; bottom: 76px; transform: translateX(-50%); width: min(70vw, 360px); height: 22px; border-radius: 11px; background: rgba(20, 14, 24, .7); border: 2px solid rgba(255,255,255,.4); overflow: hidden; }
+body.touch #meter { bottom: 196px; }
+#meter-fill { height: 100%; width: 0; background: linear-gradient(90deg, #7cf29a, #ffd23f 60%, #e8384f); }
+#meter-sweet { position: absolute; top: -2px; bottom: -2px; width: 4px; margin-left: -2px; background: #fff; box-shadow: 0 0 6px #fff; }
+#toast { position: absolute; left: 50%; top: 24%; transform: translateX(-50%); text-align: center; pointer-events: none; text-shadow: 0 3px 0 rgba(0,0,0,.5), 0 0 18px rgba(0,0,0,.35); }
+#toast b { display: block; font-size: clamp(30px, 8vw, 56px); line-height: 1; color: var(--gold); }
+#toast span { display: block; font-size: clamp(15px, 3.6vw, 20px); font-weight: 700; margin-top: 6px; }
+#toast.pop { animation: pop .35s ease-out; }
+@keyframes pop { from { transform: translateX(-50%) scale(.6); opacity: 0; } }
+/* touch controls */
+#stick { position: absolute; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.35); pointer-events: none; }
+#knob { position: absolute; left: 34px; top: 34px; width: 52px; height: 52px; border-radius: 50%; background: rgba(255, 210, 63, .8); }
+.tbtns { position: absolute; right: 14px; bottom: calc(max(16px, env(safe-area-inset-bottom)) + 4px); display: none; flex-direction: column; align-items: flex-end; gap: 12px; pointer-events: auto; }
+body.touch.playing .tbtns { display: flex; }
+.tbtns button { border-radius: 50%; border: 3px solid rgba(255,255,255,.7); color: #fff; font: 800 15px "Baloo 2", system-ui; touch-action: none; }
+#btn-act { width: 92px; height: 92px; background: radial-gradient(circle at 40% 35%, #ff6b6b, #c0182e); }
+#btn-run { width: 64px; height: 64px; background: rgba(47, 111, 214, .85); font-size: 12px; }
+.corner { position: absolute; right: 12px; top: calc(max(10px, env(safe-area-inset-top)) + 52px); pointer-events: auto; }
+.corner button { background: rgba(20,14,24,.6); color: var(--ink); border: 2px solid rgba(255,255,255,.3); border-radius: 10px; font: 700 13px "Baloo 2", system-ui; padding: 2px 10px; min-height: 30px; }
+/* screens */
+.screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: safe center; gap: 10px; padding: 20px 16px; text-align: center; background: linear-gradient(180deg, rgba(20,14,24,.35), rgba(20,14,24,.78)); overflow-y: auto; }
+.logo { margin: 0; font-size: clamp(44px, 11vw, 88px); line-height: .9; font-weight: 800; color: var(--gold); text-shadow: 0 6px 0 #a3311f, 0 0 40px rgba(255, 180, 90, .45); }
+.logo small { display: block; margin-top: 10px; font-size: .3em; color: #fff; text-shadow: 0 2px 0 rgba(0,0,0,.4); letter-spacing: .08em; }
+.tag { margin: 0; color: var(--muted); max-width: 32em; text-shadow: 0 1px 2px rgba(0,0,0,.6); }
+h2 { margin: 0; font-size: clamp(24px, 6vw, 36px); color: var(--gold); }
+.row, .modes { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+button { font: inherit; font-weight: 700; color: var(--ink); background: rgba(60, 36, 50, .9); border: 2px solid rgba(255, 210, 63, .5); border-radius: 12px; padding: 8px 18px; cursor: pointer; min-height: 44px; }
+button:focus-visible { outline: 3px solid var(--pink); outline-offset: 2px; }
+button.primary { background: var(--gold); color: #3a1a0a; border-color: var(--gold); box-shadow: 0 4px 0 #b8860b; font-size: 18px; }
+.modes button { min-height: 38px; padding: 4px 14px; font-size: 15px; }
+.modes button[aria-pressed=true] { background: var(--red); border-color: #ffb3b3; }
+.sound { min-width: 44px; padding: 6px 10px; font-size: 18px; }
+.calm { font-size: 13px; min-height: 34px; padding: 2px 12px; }
+.muted { color: var(--muted); margin: 0; font-size: 14px; }
+.card { background: rgba(20, 14, 24, .82); border: 2px solid rgba(255,210,63,.4); border-radius: 16px; padding: 14px 18px; max-width: 520px; text-align: left; }
+.card ol { margin: 6px 0; padding-left: 20px; }
+.card li { margin: 4px 0; }
+.keys { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-size: 14px; }
+kbd { background: #3a2a3a; border: 1px solid #6a5a6a; border-radius: 4px; padding: 0 6px; font: 12px ui-monospace, monospace; }
+.score { font-size: clamp(48px, 12vw, 72px); font-weight: 800; color: var(--gold); line-height: 1; }
+.new { color: var(--pink); font-weight: 800; }
+table { border-collapse: collapse; font-size: 14px; }
+th, td { padding: 3px 10px; text-align: center; }
+th { color: var(--muted); font-weight: 700; }
+tr.me td { color: var(--gold); font-weight: 800; }
+.help { position: absolute; bottom: 8px; left: 0; right: 0; text-align: center; font-size: 12px; color: var(--muted); }
+.help a { color: var(--gold); }
+body.playing .help { display: none; }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+</style>
+</head>
+<body>
+<main class="stage" id="stage">
+  <canvas id="view" aria-label="A barangay street at sunset: kids play tumbang preso around a sardinas can"></canvas>
+
+  <div id="hud" hidden>
+    <div class="hud-top">
+      <div class="chip"><small>PUNTOS</small><b id="score">0</b></div>
+      <div class="chip"><small>UWI SA 6:00</small><b id="clock">5:00 PM</b></div>
+      <div class="chip" id="role">TAGABATO</div>
+    </div>
+    <p id="prompt"></p>
+    <div id="meter" hidden><div id="meter-fill"></div><div id="meter-sweet"></div></div>
+    <div id="toast" hidden></div>
+    <div id="stick" hidden><div id="knob"></div></div>
+    <div class="tbtns"><button type="button" id="btn-run" aria-label="Sprint">TAKBO</button><button type="button" id="btn-act" aria-label="Throw or dive">IBATO</button></div>
+    <div class="corner" id="pause-btn-wrap"><button type="button" id="pause-btn" aria-label="Pause">❚❚</button></div>
+  </div>
+
+  <section class="screen" id="title">
+    <h1 class="logo">TUMBANG PRESO<small>laro sa kalye, bago tawagin ni Nanay</small></h1>
+    <p class="tag">Ibato ang tsinelas, patumbahin ang lata, at kunin ito pabalik bago ka mahuli ng taya. Kapag nahuli ka, ikaw na ang taya!</p>
+    <div class="modes" role="group" aria-label="Difficulty">
+      <button type="button" data-diff="madali">Madali</button>
+      <button type="button" data-diff="katamtaman">Katamtaman</button>
+      <button type="button" data-diff="mahirap">Mahirap</button>
+    </div>
+    <p class="muted" id="diff-note"></p>
+    <div class="row">
+      <button type="button" class="primary" id="play">Laro na! · Play</button>
+      <button type="button" id="how-btn">Paano laruin</button>
+      <button type="button" class="sound"></button>
+    </div>
+    <p class="muted" id="title-best"></p>
+    <p class="muted">🎮 Works with a PlayStation or any controller · keyboard · touch</p>
+    <button type="button" class="calm" aria-pressed="false"></button>
+  </section>
+
+  <section class="screen" id="how" hidden>
+    <h2>Paano laruin</h2>
+    <div class="card">
+      <ol>
+        <li>Behind the chalk <b>line</b> you are safe. Hold to aim at the <b>lata</b>, let go when the power is right, and your tsinelas flies.</li>
+        <li>Knock the can down and the <b>taya</b> must stand it back in its circle before tagging anyone. That's your chance to fetch your slipper and run home.</li>
+        <li>Out past the line you can be tagged, unless you are <b>standing on your own tsinelas</b>. Wait for the right moment!</li>
+        <li>Tagged? <b>You're the taya now</b>: guard the can and chase whoever steps out. Tag someone to get back to throwing.</li>
+        <li>Play until 6:00, when Nanay calls everyone home to eat.</li>
+      </ol>
+      <div class="keys">
+        <span><kbd>WASD</kbd>/<kbd>↑↓←→</kbd></span><span>takbo (move) · <kbd>Shift</kbd> bilis</span>
+        <span><kbd>Space</kbd> (hold)</span><span>asinta, bitaw para ibato · as taya: sugod (dive)</span>
+        <span><kbd>Q</kbd>/<kbd>E</kbd>, mouse drag</span><span>ikot ng camera</span>
+        <span>🎮</span><span>L-stick takbo · ✕ ibato/sugod · ○ bilis · R-stick camera</span>
+        <span>📱</span><span>left thumb: stick · IBATO, TAKBO buttons · drag right side to look</span>
+      </div>
+      <p class="muted" style="margin-top:8px">Sa totoong buhay: maglaro sa ligtas na lugar, malayo sa mga sasakyan.</p>
+    </div>
+    <button type="button" class="primary" id="how-ok">Sige! · Let's play</button>
+  </section>
+
+  <section class="screen" id="pause" hidden>
+    <h2>Hinto · Paused</h2>
+    <div class="row"><button type="button" class="primary" id="resume">Tuloy · Resume</button><button type="button" class="sound"></button><button type="button" class="menu">Menu</button></div>
+    <button type="button" class="calm" aria-pressed="false"></button>
+  </section>
+
+  <section class="screen" id="over" hidden>
+    <h2>Uwi na! Kakain na!</h2>
+    <div class="score" id="over-score"></div>
+    <p id="over-best"></p>
+    <table><thead><tr><th></th><th>Natumba</th><th>Nahuli</th><th>Nataya</th></tr></thead><tbody id="over-table"></tbody></table>
+    <p class="muted">Natumba: cans knocked down · Nahuli: kids tagged as taya · Nataya: times you were tagged</p>
+    <div class="row"><button type="button" class="primary" id="retry">Isa pa bukas! · Again</button><button type="button" class="menu">Menu</button></div>
+  </section>
+  <p class="help" id="credit">A street game by <a href="https://kon2raya.netlify.app" target="_blank" rel="noopener">Lemmuel Turaya</a> · <a href="https://tambayan-arcade.vercel.app/">More games</a> · <a href="https://tambayan-arcade.vercel.app/#support">☕ Support</a></p>
+</main>
+<script>if (matchMedia('(pointer: coarse)').matches) document.body.classList.add('touch');</script>
+<script type="module" src="src/main.mjs"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "name": "Tumbang Preso",
+  "short_name": "Tumbang Preso",
+  "description": "The Filipino street game in 3D: knock down the lata with your tsinelas and run home before the taya tags you.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#2a1d2a",
+  "theme_color": "#2a1d2a",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
