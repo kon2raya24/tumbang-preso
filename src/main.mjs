@@ -6,6 +6,8 @@ import { loadPeople } from './people.mjs';
 import { loadCrowd } from './crowd.mjs';
 import { loadEnv } from './envpack.mjs';
 import { createAudio } from './audio.mjs';
+import { createBarks } from './barks.mjs';
+import { MEDALS, earned } from './medals.mjs';
 
 const Q = new URLSearchParams(location.search);
 const TEST = Q.get('test') === '1';
@@ -19,9 +21,16 @@ const saved = store.get() || {};
 const data = {
   best: saved.best && typeof saved.best === 'object' ? saved.best : {}, muted: !!saved.muted, calm: !!saved.calm,
   difficulty: DIFFICULTY[saved.difficulty] ? saved.difficulty : 'madali', hints: Array.isArray(saved.hints) ? saved.hints : [], how: !!saved.how,
+  medals: Array.isArray(saved.medals) ? saved.medals : [],
   view: saved.view === 'chase' ? 'chase' : 'fp',
   gfx: [0, 1, 2].includes(saved.gfx) ? saved.gfx : 'auto', // graphics: auto (steps down on slow devices) or a fixed level
+  // the player's settings: the game (mode, length, players, the throw's arc), the controls, the sound
+  opt: { mode: 'klasiko', minutes: 3, players: 5, arc: 'auto', sens: 1, invert: false, fov: 72, music: 1, sfx: 1, ...(saved.opt || {}) },
 };
+const MODES = { klasiko: 'Klasiko', walang: 'Walang Katapusan', taya: 'Ikaw ang Taya' };
+// the best score is kept for each way of playing; the classic three minutes keep their old key
+const bestKey = () => (data.opt.mode === 'klasiko' && data.opt.minutes === 3 && data.opt.players === 5 ? data.difficulty : `${data.opt.mode}:${data.difficulty}:${data.opt.minutes}:${data.opt.players}`);
+const preview = () => (data.opt.arc === 'buo' ? 1 : data.opt.arc === 'wala' ? 0 : game.diff.preview);
 const firstPerson = () => data.view === 'fp';
 const persist = () => store.set(data);
 const reduced = () => data.calm || matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -37,7 +46,7 @@ const A = createAudio();
 A.setMuted(data.muted);
 let mode = 'title', game = createGame({ seed: seed(), demo: true, difficulty: 'katamtaman' });
 
-const SCREENS = ['title', 'how', 'pause', 'over'];
+const SCREENS = ['title', 'how', 'pause', 'over', 'settings'];
 function show(name) {
   for (const id of SCREENS) $(id).hidden = id !== name;
   document.body.classList.toggle('playing', name === null);
@@ -49,12 +58,18 @@ function show(name) {
 function start() {
   A.start();
   if (!data.how && !TEST) { mode = 'how'; show('how'); return; }
-  game = createGame({ seed: seed(), difficulty: data.difficulty });
+  const o = data.opt;
+  game = createGame({ seed: seed(), difficulty: data.difficulty, minutes: o.minutes, endless: o.mode === 'walang', players: o.players, startTaya: o.mode === 'taya' });
   mode = 'play'; aim = null; cam.yaw = view.autoYaw(game); cam.pitch = PITCH; cam.turnTo = null; cam.manual = 9; clearInput();
   show(null);
   lock();
-  toast('MAIBA TAYA!', `Si ${taya(game).name} ang taya.`, 2200);
-  if (!touch && firstPerson()) hint('fp', canLock ? 'Mouse: tumingin · Click o Space: ibato · WASD: lakad · V: ibang camera' : 'I-drag ang mouse para tumingin · Space: ibato · WASD: lakad · V: ibang camera');
+  newMedals = []; mvp = undefined; maibaStart();
+  hintFp = !touch && firstPerson();
+}
+let hintFp = false;
+function fpHint() {
+  if (!hintFp) return; hintFp = false;
+  hint('fp', canLock ? 'Mouse: tumingin · Click o Space: ibato · WASD: lakad · V: ibang camera' : 'I-drag ang mouse para tumingin · Space: ibato · WASD: lakad · V: ibang camera');
 }
 
 // ---------- input ----------
@@ -66,8 +81,8 @@ let aim = null; // { t, off } while you hold to aim
 function clearInput() { keys.clear(); pressedAct = false; actHeld = false; runHeld = false; mouseHeld = false; aim = null; stick = null; }
 // Looking around: yaw grows to the left, so turning right takes it down. Any look cancels an auto-turn.
 function look(dYaw, dPitch = 0) {
-  cam.yaw -= dYaw; cam.manual = 0; cam.turnTo = null;
-  if (firstPerson()) cam.pitch = clamp(cam.pitch - dPitch, -1.0, 0.75);
+  cam.yaw -= dYaw * data.opt.sens; cam.manual = 0; cam.turnTo = null;
+  if (firstPerson()) cam.pitch = clamp(cam.pitch - dPitch * data.opt.sens * (data.opt.invert ? -1 : 1), -1.0, 0.75);
 }
 
 // the mouse, locked to the game in first person: move to look, hold the button to aim
@@ -115,6 +130,33 @@ function readPad() {
   readPad.tri = b(3);
   return { x, y, cx: dz(p.axes[2] || 0), cy: dz(p.axes[3] || 0), act, run: b(1) || b(7) || b(5) };
 }
+// the menus on a controller: the d-pad or stick moves between buttons (sliders step), ✕ presses, ○ goes back
+const menuPad = { held: {}, rep: 0 };
+function padMenus(dt) {
+  const p = navigator.getGamepads ? [...navigator.getGamepads()].filter(Boolean)[0] : null;
+  const screen = mode === 'play' ? null : SCREENS.find((id) => !$(id).hidden);
+  if (!p) return;
+  const b = (i) => !!(p.buttons[i] && p.buttons[i].pressed), ax = p.axes || [];
+  // a button still held from the game (Options to pause) doesn't count as a press here
+  if (!screen || screen !== menuPad.screen) { menuPad.screen = screen; menuPad.held = { x: b(0), o: b(1), opt: b(9) }; return; }
+  const dir = b(12) || ax[1] < -0.5 ? 'up' : b(13) || ax[1] > 0.5 ? 'down' : b(14) || ax[0] < -0.5 ? 'left' : b(15) || ax[0] > 0.5 ? 'right' : null;
+  const edge = (k, on) => { const was = menuPad.held[k]; menuPad.held[k] = on; return on && !was; };
+  menuPad.rep -= dt;
+  const moved = dir && (edge('dir:' + dir, true) || menuPad.rep <= 0);
+  for (const d of ['up', 'down', 'left', 'right']) if (d !== dir) menuPad.held['dir:' + d] = false;
+  if (moved) {
+    menuPad.rep = 0.22;
+    const items = [...$(screen).querySelectorAll('button, input[type=range], a')].filter((el) => el.offsetParent !== null);
+    const at = items.indexOf(document.activeElement);
+    if (document.activeElement && document.activeElement.type === 'range' && (dir === 'left' || dir === 'right')) {
+      const r = document.activeElement; r.value = String(+r.value + (dir === 'right' ? 1 : -1) * +r.step); r.dispatchEvent(new Event('input'));
+    } else if (items.length) items[(at + (dir === 'up' || dir === 'left' ? -1 : 1) + items.length) % items.length].focus();
+  }
+  if (edge('x', b(0)) && document.activeElement && $(screen).contains(document.activeElement) && document.activeElement.click) document.activeElement.click();
+  if (edge('o', b(1))) { if (screen === 'settings') $('settings-ok').click(); else if (screen === 'how') $('how-ok').click(); else if (screen === 'pause') resume(); }
+  if (edge('opt', b(9)) && screen === 'pause') resume();
+}
+
 window.addEventListener('gamepadconnected', () => toast('🎮 Controller', 'L-stick: takbo · R-stick: tingin · ✕: ibato/sugod · ○: bilis · △: camera', 3200));
 
 // touch: a stick wherever your left thumb lands, buttons on the right, drag the right side to look
@@ -194,13 +236,12 @@ function gather(dt) {
 const aimYaw = (me) => (firstPerson() ? cam.yaw : yawTo(me.x, me.z, game.can.x, game.can.z) + aim.off);
 
 // ---------- the HUD ----------
-const hudEl = { cross: $('cross'), score: $('score'), clock: $('clock'), role: $('role'), prompt: $('prompt'), meter: $('meter'), fill: $('meter-fill'), sweet: $('meter-sweet'), act: $('btn-act') };
+const hudEl = { clockLabel: $('clock-label'), cross: $('cross'), score: $('score'), clock: $('clock'), role: $('role'), prompt: $('prompt'), meter: $('meter'), fill: $('meter-fill'), sweet: $('meter-sweet'), act: $('btn-act') };
 function hud() {
   const g = game, me = you(g);
   hudEl.score.textContent = String(g.score);
-  const mins = Math.min(59, Math.floor((g.t / g.limit) * 60));
-  hudEl.clock.textContent = `5:${String(mins).padStart(2, '0')} PM`;
-  hudEl.clock.classList.toggle('late', mins >= 50);
+  if (g.endless) { const s2 = Math.floor(g.t); hudEl.clock.textContent = `${Math.floor(s2 / 60)}:${String(s2 % 60).padStart(2, '0')}`; hudEl.clockLabel.textContent = 'WALANG UWIAN'; hudEl.clock.classList.remove('late'); }
+  else { const mins = Math.min(59, Math.floor((g.t / g.limit) * 60)); hudEl.clock.textContent = `5:${String(mins).padStart(2, '0')} PM`; hudEl.clockLabel.textContent = 'UWI SA 6:00'; hudEl.clock.classList.toggle('late', mins >= 50); }
   const t = me.role === 'taya';
   hudEl.role.textContent = t ? 'IKAW ANG TAYA!' : 'TAGABATO';
   hudEl.role.classList.toggle('taya', t);
@@ -219,7 +260,7 @@ function hud() {
     hudEl.fill.style.width = `${meter(aim.t) * 100}%`;
     const want = powerFor(me.x, me.z, game.can.x, game.can.z);
     hudEl.sweet.style.left = `${want * 100}%`;
-    hudEl.sweet.hidden = g.diff.preview <= 0;
+    hudEl.sweet.hidden = preview() <= 0;
   }
 }
 
@@ -238,8 +279,8 @@ function onEvent(e) {
   A.event(e, game);
   const me = you(game), mine = e.kid === me.i;
   switch (e.type) {
-    case 'go': A.start(); break;
-    case 'knock': slowT = 0.75; if (mine) { toast('NATUMBA!', `+${e.points}${e.saves ? ` · SALBA ×${e.saves}` : ''}`); buzz(40); } else if (me.role === 'thrower' && !me.hasSlip) toast(`Natumba ni ${game.kids[e.kid].name}!`, 'Kunin na ang tsinelas mo!'); else if (me.role === 'taya') toast('Natumba ang lata!', 'Itayo mo agad sa bilog!'); break;
+    case 'go': A.start(); $('maiba').hidden = true; maiba = null; fpHint(); break;
+    case 'knock': slowT = 0.75; if (mine) { toast(e.streak >= 4 ? 'WALANG TIGIL!' : e.streak === 3 ? 'TRIPLE!' : e.streak === 2 ? 'DOBLE!' : e.far ? 'ASINTADO!' : 'NATUMBA!', [`+${e.points}`, e.far && `MALAYUAN ${e.range.toFixed(1)} m`, e.streak > 1 && `SUNOD-SUNOD ×${e.streak}`, e.saves && `SALBA ×${e.saves}`].filter(Boolean).join(' · ')); buzz(40); } else if (me.role === 'thrower' && !me.hasSlip) toast(`Natumba ni ${game.kids[e.kid].name}!`, 'Kunin na ang tsinelas mo!'); else if (me.role === 'taya') toast('Natumba ang lata!', 'Itayo mo agad sa bilog!'); break;
     case 'tag':
       if (e.kid === me.i || e.taya === me.i) cam.turnTo = view.autoYaw(game);
       if (e.kid === me.i) { toast('TAYA KA!', `Nahuli ka ni ${game.kids[e.taya].name}.`, 1800); buzz([60, 40, 60]); hint('taya', 'Ikaw ang taya: habulin ang nasa labas ng linya habang nakatayo ang lata. Kapag natumba, itayo muna!'); }
@@ -252,11 +293,56 @@ function onEvent(e) {
     case 'over': finish(); break;
     default: break;
   }
+  barks.event(e, game);
+  for (const id of earned(game, e)) award(id);
 }
 
-function pause() { if (mode === 'play') { mode = 'pause'; unlock(); show('pause'); } }
+// ---------- the kids' voices, medals, and "Maiba taya!" ----------
+const barks = createBarks((i, text) => view.bark(i, text));
+let newMedals = [];
+function award(id) {
+  if (data.medals.includes(id)) return;
+  const m = MEDALS.find((x) => x.id === id);
+  data.medals.push(id); newMedals.push(id); persist();
+  const el = $('medal');
+  el.innerHTML = '<i></i><div><small>BAGONG MEDALYA</small><b></b><span></span></div>';
+  el.querySelector('i').textContent = m.glyph; el.querySelector('b').textContent = m.name; el.querySelector('span').textContent = m.desc;
+  el.hidden = false; el.classList.remove('in'); void el.offsetWidth; el.classList.add('in');
+  medalT = 3.2;
+  A.event({ type: 'medal' }, game);
+}
+let medalT = 0, clockT = 0;
+// a roulette over the barkada, slowing down onto whoever guards the can first
+let maiba = null;
+function maibaStart() {
+  const el = $('maiba'), box = el.querySelector('.chips'), t = taya(game), n = game.kids.length;
+  box.innerHTML = '';
+  const chips = game.kids.map((k) => { const c = document.createElement('span'); c.textContent = k.you ? 'IKAW' : k.name; c.style.setProperty('--c', k.shirt); box.appendChild(c); return c; });
+  const from = Math.floor(Math.random() * n), total = 12 + (((t.i - from - 12) % n) + n) % n, steps = [];
+  for (let s = 0, at = 0, gap = 1; s <= total; s++, at += gap, gap *= 1.09) steps.push({ at, i: (from + s) % n });
+  const end = steps[steps.length - 1].at;
+  for (const s of steps) s.at = (s.at / end) * 1.9; // it lands at 1.9 s, with a beat to read it before the whistle
+  el.querySelector('b').textContent = ''; el.classList.remove('landed'); el.hidden = false;
+  maiba = { steps, chips, at: -1, start: game.phaseT };
+}
+function maibaTick() {
+  if (!maiba) return;
+  const s = maiba.steps.findLastIndex((x) => x.at <= maiba.start - game.phaseT);
+  if (s === maiba.at || s < 0) return;
+  maiba.at = s;
+  maiba.chips.forEach((c, i) => c.classList.toggle('on', i === maiba.steps[s].i));
+  const last = s === maiba.steps.length - 1;
+  A.event({ type: 'count', n: last ? 0 : 1 }, game);
+  if (last) {
+    const t = taya(game);
+    $('maiba').querySelector('b').textContent = t.you ? 'IKAW ANG TAYA!' : `SI ${t.name.toUpperCase()} ANG TAYA!`;
+    $('maiba').classList.add('landed');
+  }
+}
+
+function pause() { if (mode === 'play') { mode = 'pause'; unlock(); $('end-btn').hidden = !game.endless; show('pause'); } }
 function resume() { if (mode === 'pause') { mode = 'play'; clearInput(); show(null); lock(); } }
-function toMenu() { mode = 'title'; unlock(); game = createGame({ seed: seed(), demo: true }); labels(); show('title'); }
+function toMenu() { mvp = undefined; $('maiba').hidden = true; maiba = null; mode = 'title'; unlock(); game = createGame({ seed: seed(), demo: true }); labels(); show('title'); }
 function toggleView() {
   data.view = firstPerson() ? 'chase' : 'fp'; persist(); labels();
   if (firstPerson()) { cam.pitch = PITCH; lock(); } else unlock();
@@ -266,18 +352,38 @@ function toggleView() {
 function finish() {
   mode = 'over';
   unlock();
-  const g = game, k = data.difficulty;
+  $('maiba').hidden = true; maiba = null;
+  const g = game, k = bestKey();
+  for (const kid of g.kids) { kid.speed = 0; kid.dive = 0; kid.recover = 0; }
+  for (const id of earned(g, null)) award(id);
   const isBest = g.score > (data.best[k] || 0);
   data.best[k] = Math.max(data.best[k] || 0, g.score); persist();
   $('over-score').textContent = g.score;
-  $('over-best').textContent = isBest && g.score ? 'Bagong best! New best!' : `Best (${DIFFICULTY[k].name}): ${data.best[k]}`;
+  $('over-best').textContent = isBest && g.score ? 'Bagong best! New best!' : `Best (${MODES[data.opt.mode]} · ${DIFFICULTY[data.difficulty].name}): ${data.best[k]}`;
   $('over-best').classList.toggle('new', isBest && g.score > 0);
-  const rows = [...g.kids].sort((a, b) => b.stats.knocks - a.stats.knocks);
+  // the best of the afternoon: knocks, then tags, then the fewest times caught
+  const rank = (x) => x.stats.knocks * 100 + x.stats.tags * 150 + x.stats.saves * 50 - x.stats.tagged * 20;
+  const rows = [...g.kids].sort((a, b) => rank(b) - rank(a));
+  mvp = rows[0].i;
+  $('over-mvp').innerHTML = '<small>PINAKAMAGALING NGAYONG HAPON</small><b></b>';
+  $('over-mvp').querySelector('b').textContent = rows[0].you ? 'IKAW!' : rows[0].name;
+  const me = you(g);
+  $('over-me').textContent = `Pinakamahabang sunod-sunod: ${me.stats.bestStreak} · Malayuan: ${me.stats.far} · Nakauwi nang ligtas: ${me.stats.homes}`;
+  $('over-medals').innerHTML = '';
+  for (const m of MEDALS) {
+    const d = document.createElement('div'), got = data.medals.includes(m.id);
+    d.className = `medal${got ? ' got' : ''}${newMedals.includes(m.id) ? ' fresh' : ''}`;
+    d.title = `${m.name}: ${m.desc}`;
+    d.innerHTML = '<i></i><small></small>'; d.querySelector('i').textContent = m.glyph; d.querySelector('small').textContent = m.name;
+    $('over-medals').appendChild(d);
+  }
+  $('over-medal-count').textContent = `Medalya ${data.medals.length}/${MEDALS.length}${newMedals.length ? ` · ${newMedals.length} bago!` : ''}`;
   $('over-table').innerHTML = '';
   for (const kid of rows) {
     const tr = document.createElement('tr');
     for (const v of [kid.you ? 'Ikaw' : kid.name, kid.stats.knocks, kid.stats.tags, kid.stats.tagged]) { const td = document.createElement('td'); td.textContent = String(v); tr.appendChild(td); }
     if (kid.you) tr.className = 'me';
+    if (kid.i === mvp) tr.classList.add('mvp');
     $('over-table').appendChild(tr);
   }
   setTimeout(() => { if (mode === 'over') show('over'); }, 1800);
@@ -287,19 +393,54 @@ function finish() {
 function toggleSound() { A.start(); data.muted = !data.muted; A.setMuted(data.muted); persist(); labels(); }
 function labels() {
   for (const b of document.querySelectorAll('.sound')) { b.textContent = data.muted ? '🔇' : '🔊'; b.setAttribute('aria-label', data.muted ? 'Sound off, turn it on' : 'Sound on, turn it off'); }
-  for (const b of document.querySelectorAll('.calm')) { b.setAttribute('aria-pressed', String(data.calm)); b.textContent = data.calm ? 'Bawas-yanig: on' : 'Bawas-yanig: off'; }
   for (const b of document.querySelectorAll('[data-diff]')) b.setAttribute('aria-pressed', String(b.dataset.diff === data.difficulty));
-  for (const b of document.querySelectorAll('.gfx')) b.textContent = `Graphics: ${{ auto: 'Auto', 2: 'Mataas', 1: 'Katamtaman', 0: 'Mababa' }[data.gfx]}`;
   $('view-btn').textContent = firstPerson() ? '1P' : '3P';
   $('view-btn').setAttribute('aria-label', firstPerson() ? 'First-person camera: switch to the chase camera' : 'Chase camera: switch to first person');
-  $('diff-note').textContent = { madali: 'Madali: mabagal ang taya, kita ang buong arko ng bato.', katamtaman: 'Katamtaman: kalahating arko lang, mas mabilis ang taya.', mahirap: 'Mahirap: walang arko, mabilis at matalas ang taya.' }[data.difficulty];
-  const b = data.best[data.difficulty];
-  $('title-best').textContent = b ? `Best (${DIFFICULTY[data.difficulty].name}): ${b}` : '';
+  $('diff-note').textContent = { klasiko: '', walang: 'Walang uwian: laro hanggang gusto mo. ', taya: 'Ikaw muna ang bantay ng lata. ' }[data.opt.mode] + { madali: 'Madali: mabagal ang taya, kita ang buong arko ng bato.', katamtaman: 'Katamtaman: kalahating arko lang, mas mabilis ang taya.', mahirap: 'Mahirap: walang arko, mabilis at matalas ang taya.' }[data.difficulty];
+  for (const b2 of document.querySelectorAll('[data-mode]')) b2.setAttribute('aria-pressed', String(b2.dataset.mode === data.opt.mode));
+  const b = data.best[bestKey()];
+  $('title-best').textContent = [b ? `Best (${MODES[data.opt.mode]} · ${DIFFICULTY[data.difficulty].name}): ${b}` : '', data.medals.length ? `Medalya ${data.medals.length}/${MEDALS.length}` : ''].filter(Boolean).join(' · ');
 }
 for (const b of document.querySelectorAll('.sound')) b.onclick = toggleSound;
-for (const b of document.querySelectorAll('.calm')) b.onclick = () => { data.calm = !data.calm; persist(); labels(); };
-for (const b of document.querySelectorAll('.gfx')) b.onclick = () => { const order = ['auto', 2, 1, 0]; data.gfx = order[(order.indexOf(data.gfx) + 1) % order.length]; persist(); labels(); if (!view) return; if (data.gfx === 'auto') { view.post.setAuto(true); view.post.setLevel(touch ? 1 : 2); } else { view.post.setAuto(false); view.post.setLevel(data.gfx); } };
 for (const b of document.querySelectorAll('[data-diff]')) b.onclick = () => { data.difficulty = b.dataset.diff; persist(); labels(); };
+for (const b of document.querySelectorAll('[data-mode]')) b.onclick = () => { data.opt.mode = b.dataset.mode; persist(); labels(); };
+
+// ---------- settings ----------
+let settingsFrom = 'title';
+function openSettings(from) {
+  settingsFrom = from; mode = 'settings';
+  const o = data.opt, f = document.activeElement, again = f && f.dataset && f.dataset.k ? `[data-k="${f.dataset.k}"]${f.dataset.v !== undefined ? `[data-v="${f.dataset.v}"]` : ''}` : null;
+  const seg = (key, list) => `<div class="modes">${list.map(([v, label]) => `<button type="button" data-k="${key}" data-v="${v}" aria-pressed="${String(key === 'gfx' ? data.gfx : key === 'calm' ? data.calm : key === 'view' ? data.view : o[key]) === String(v)}">${label}</button>`).join('')}</div>`;
+  const slider = (key, lo, hi, st, label) => `<label class="slide">${label} <input type="range" min="${lo}" max="${hi}" step="${st}" value="${o[key]}" data-k="${key}"></label>`;
+  $('settings-body').innerHTML = `
+    <div class="grp"><h3>Laro · Game</h3>
+    <p class="muted">Haba ng hapon · Length</p>${seg('minutes', [[3, '3 min'], [5, '5 min'], [8, '8 min']])}
+    <p class="muted">Kalaro · Players</p>${seg('players', [[3, '3'], [4, '4'], [5, '5']])}
+    <p class="muted">Arko ng bato · Throw arc</p>${seg('arc', [['auto', 'Ayon sa hirap'], ['buo', 'Buo · Full'], ['wala', 'Wala · Off']])}
+    </div><div class="grp"><h3>Kontrol · Controls</h3>
+    <p class="muted">Camera</p>${seg('view', [['fp', 'Unang tao · 1P'], ['chase', 'Sa likod · 3P']])}
+    ${slider('sens', 0.4, 2, 0.1, 'Bilis ng tingin · Look speed')}
+    <p class="muted">Baliktad ang taas-baba · Invert Y</p>${seg('invert', [[false, 'Hindi · Off'], [true, 'Oo · On']])}
+    <p class="muted">Lawak ng tanaw · Field of view</p>${seg('fov', [[64, 'Makitid'], [72, 'Karaniwan'], [84, 'Malawak']])}
+    </div><div class="grp"><h3>Tunog at itsura · Sound and look</h3>
+    ${slider('music', 0, 1, 0.05, 'Musika · Music')}${slider('sfx', 0, 1, 0.05, 'Tunog · Effects')}
+    <p class="muted">Graphics</p>${seg('gfx', [['auto', 'Auto'], [2, 'Mataas'], [1, 'Katamtaman'], [0, 'Mababa']])}
+    <p class="muted">Yanig ng camera · Camera shake</p>${seg('calm', [[false, 'Buo · Full'], [true, 'Kalmado · Reduced']])}</div>`;
+  for (const b of $('settings-body').querySelectorAll('button')) b.onclick = () => {
+    const k = b.dataset.k, raw = b.dataset.v, v = raw === 'true' ? true : raw === 'false' ? false : isNaN(+raw) ? raw : +raw;
+    if (k === 'gfx') { data.gfx = v; if (view) { view.post.setAuto(v === 'auto'); view.post.setLevel(v === 'auto' ? (touch ? 1 : 2) : v); } }
+    else if (k === 'calm') data.calm = v;
+    else if (k === 'view') { if (data.view !== v) toggleView(); }
+    else o[k] = v;
+    persist(); labels(); openSettings(settingsFrom);
+  };
+  for (const r of $('settings-body').querySelectorAll('input[type=range]')) r.oninput = () => { o[r.dataset.k] = +r.value; A.start(); A.setMix(o); persist(); };
+  show('settings');
+  if (again && $('settings-body').querySelector(again)) $('settings-body').querySelector(again).focus({ preventScroll: true }); // keep your place after a change
+}
+$('settings-ok').onclick = () => { if (settingsFrom === 'pause') { mode = 'pause'; show('pause'); } else { mode = 'title'; show('title'); } };
+for (const b of document.querySelectorAll('.settings-btn')) b.onclick = () => openSettings(mode === 'pause' ? 'pause' : 'title');
+A.setMix(data.opt);
 $('play').onclick = start;
 $('how-ok').onclick = () => { data.how = true; persist(); start(); };
 $('how-btn').onclick = () => { mode = 'how'; show('how'); };
@@ -308,11 +449,13 @@ $('resume').onclick = resume;
 $('pause-btn').onclick = pause;
 $('view-btn').onclick = toggleView;
 for (const b of document.querySelectorAll('.menu')) b.onclick = toMenu;
+// with no six o'clock, you call it a day yourself
+$('end-btn').onclick = () => { game.phase = 'over'; show(null); finish(); };
 document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
 labels();
 
 // ---------- loop ----------
-let last = performance.now(), slowT = 0;
+let last = performance.now(), slowT = 0, mvp;
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
@@ -329,16 +472,21 @@ function frame(now) {
       // a chase camera: it trails behind you while you run, and turns to what matters when you stop or aim
       cam.yaw = lerpAngle(cam.yaw, moving ? me.yaw : view.autoYaw(game), Math.min(1, dt * (aim ? 6 : moving ? 1.6 : 1.2)));
     }
+    barks.tick(game, dt);
+    maibaTick();
+    if ((clockT += dt) > 1) { clockT = 0; for (const id of earned(game, { type: 'clock' })) award(id); }
     hud();
-  } else if (mode === 'title' || mode === 'how') {
+  } else if (mode === 'title' || mode === 'how' || mode === 'settings') {
     step(game, NOINPUT, dt);
     if (game.phase === 'over') game = createGame({ seed: seed(), demo: true });
   }
+  padMenus(dt);
   if (toastT > 0 && (toastT -= dt) <= 0) $('toast').hidden = true;
+  if (medalT > 0 && (medalT -= dt) <= 0) $('medal').hidden = true;
   const me = you(game);
   view.frame(game, dt, {
     mode: mode === 'play' || mode === 'pause' ? 'play' : mode === 'over' ? 'over' : 'title', view: data.view, camYaw: cam.yaw, camPitch: cam.pitch, reduced: reduced(),
-    aim: aim && mode === 'play' ? { yaw: aimYaw(me), power: meter(aim.t) } : null, preview: game.diff.preview,
+    aim: aim && mode === 'play' ? { yaw: aimYaw(me), power: meter(aim.t) } : null, preview: preview(), fov: data.opt.fov, mvp,
   });
   A.update(game, mode === 'play', dt);
   requestAnimationFrame(frame);

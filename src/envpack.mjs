@@ -7,9 +7,10 @@ import * as THREE from './vendor/three.module.min.js';
 import { GLTFLoader } from './vendor/three-mocap.min.js';
 import { HDRLoader } from './vendor/three-fx.min.js';
 
-// the sky: [photo for light, strength, turn]; the one seen behind: [photo, turn, brightness]
+// the sky: [photo for light, strength, turn]; the one seen behind: [photo, turn, brightness, and the dusk it
+// fades into toward six o'clock: photo, how far round its sun sits from the afternoon's]
 const SKY = { eskinita: ['pretville_street', 0.55, 1.2] };
-const BACKDROP = { eskinita: ['kloppenheim_06_puresky', 2.2, 1] };
+const BACKDROP = { eskinita: ['kloppenheim_06_puresky', 2.2, 1, 'belfast_sunset_puresky', 0.05] };
 
 // [prop, x, y, z, turn, scale]. The eskinita runs along z; the houses stand at x = ±7.8, facing in.
 const L = Math.PI / 2, W = 7.8; // a turn that faces a prop out from the left wall (+x) or the right (-x)
@@ -74,12 +75,16 @@ export async function dress(env, id, stage, ctx) {
     if (rt && ctx.current()) ctx.setEnvironment(rt.texture, skyPower, skyTurn);
   })());
   // the sky behind
-  const [bgId, bgTurn, bgBright] = BACKDROP[id] || [];
+  const [bgId, bgTurn, bgBright, duskId, duskShift] = BACKDROP[id] || [];
   if (bgId && env.index.backdrop && env.index.backdrop[bgId]) jobs.push(texLoader.loadAsync(env.base + env.index.backdrop[bgId]).then((t) => {
     if (!ctx.current()) return;
     t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; ctx.setBackdrop(t, bgTurn, bgBright);
     stage.group.traverse((o) => { if (o.isMesh && [].concat(o.material).some((m) => m.userData.skyStandIn)) o.visible = false; });
   }).catch(() => { /* the painted sky stays */ }));
+  if (duskId && env.index.backdrop && env.index.backdrop[duskId] && ctx.setDusk) jobs.push(texLoader.loadAsync(env.base + env.index.backdrop[duskId]).then((t) => {
+    if (!ctx.current()) return;
+    t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; t.wrapS = THREE.RepeatWrapping; ctx.setDusk(t, duskShift);
+  }).catch(() => { /* the afternoon sky stays */ }));
   // the surfaces
   const mats = new Map();
   stage.group.traverse((o) => { if (o.isMesh) for (const m of [].concat(o.material)) if (m.userData.surface) mats.set(m, m.userData.surface); });

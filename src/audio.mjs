@@ -9,7 +9,7 @@ const BASS = [48, 50, 45, 43];
 
 export function createAudio({ base = 'assets/sfx/' } = {}) {
   let ctx = null, master = null, music = null, sfx = null, noise = null, muted = false, murmur = null;
-  const buf = {};
+  const buf = {}, mix = { music: 1, sfx: 1 };
   let step = 0, nextAt = 0, playing = false, tempo = 112, stepT = 0;
 
   function start() {
@@ -17,7 +17,7 @@ export function createAudio({ base = 'assets/sfx/' } = {}) {
     try { ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch { return; }
     master = ctx.createGain(); master.gain.value = muted ? 0 : 0.7; master.connect(ctx.destination);
     music = ctx.createGain(); music.gain.value = 0; music.connect(master);
-    sfx = ctx.createGain(); sfx.connect(master);
+    sfx = ctx.createGain(); sfx.gain.value = mix.sfx; sfx.connect(master);
     noise = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
     const d = noise.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
     setInterval(schedule, 50);
@@ -74,11 +74,12 @@ export function createAudio({ base = 'assets/sfx/' } = {}) {
   return {
     start,
     setMuted(m) { muted = m; if (master) master.gain.value = m ? 0 : 0.7; },
+    setMix(m) { mix.music = m.music ?? mix.music; mix.sfx = m.sfx ?? mix.sfx; if (sfx) sfx.gain.value = mix.sfx; },
     update(g, on, dt) {
       if (!ctx) return;
       const live = on && g && g.phase === 'play';
       if (live !== playing) { playing = live; if (live) nextAt = ctx.currentTime + 0.05; }
-      music.gain.setTargetAtTime(live ? 0.8 : 0, ctx.currentTime, 0.3);
+      music.gain.setTargetAtTime(live ? 0.8 * mix.music : 0, ctx.currentTime, 0.3);
       tempo = 108 + Math.floor((g ? g.t / g.limit : 0) * 24);
       const me = g && g.kids.find((k) => k.you);
       if (live && me && me.speed > 1 && (stepT -= dt) <= 0) { stepT = 1.6 / me.speed; if (!play('step_concrete', 0.35, 1, 0.12)) hiss(0.04, 900, 0.035, 0, 'lowpass'); }
@@ -99,6 +100,7 @@ export function createAudio({ base = 'assets/sfx/' } = {}) {
         case 'pickup': [0, 7].forEach((k, i) => tone(NOTE(79 + k), 0.08, 'triangle', 0.04, i * 0.05)); break;
         case 'home': [0, 4, 7].forEach((k, i) => tone(NOTE(76 + k), 0.1, 'triangle', 0.05, i * 0.06)); break;
         case 'count': tone(e.n === 0 ? 880 : 660, 0.12, 'square', 0.04); break;
+        case 'medal': [0, 4, 7, 12, 16].forEach((k, i) => tone(NOTE(76 + k), 0.18, 'triangle', 0.05, i * 0.08)); break;
         case 'over': for (let k = 0; k < 6; k++) tone(k % 2 ? 784 : 988, 0.5, 'sine', 0.05, k * 0.35); break; // Nanay's bell
         default: break;
       }

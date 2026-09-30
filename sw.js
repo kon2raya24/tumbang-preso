@@ -1,10 +1,10 @@
 // Offline play: the game's own files (three.js included) are cached on install and served
 // cache-first; the webfont is cached the first time it loads. Bump VERSION whenever a file changes.
-const VERSION = 'tumbangpreso-v6';
+const VERSION = 'tumbangpreso-v7';
 const ASSETS = [
   './', 'index.html', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
-  'src/main.mjs', 'src/sim.mjs', 'src/view3d.mjs', 'src/audio.mjs', 'src/rng.mjs', 'src/people.mjs', 'src/envpack.mjs', 'src/crowd.mjs', 'src/post.mjs', 'src/tex.mjs', 'src/vendor/three.module.min.js', 'src/vendor/three-mocap.min.js', 'src/vendor/three-fx.min.js',
+  'src/main.mjs', 'src/sim.mjs', 'src/view3d.mjs', 'src/audio.mjs', 'src/rng.mjs', 'src/people.mjs', 'src/barks.mjs', 'src/medals.mjs', 'src/envpack.mjs', 'src/crowd.mjs', 'src/post.mjs', 'src/tex.mjs', 'src/vendor/three.module.min.js', 'src/vendor/three-mocap.min.js', 'src/vendor/three-fx.min.js',
 ];
 
 self.addEventListener('install', (e) => {

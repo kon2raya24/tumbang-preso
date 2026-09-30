@@ -17,7 +17,9 @@ export const SLIP = { r: 0.15, hold: 1.1 };
 export const KID = { r: 0.32, speed: 4.2, sprint: 5.7, reach: 0.72, pick: 0.5, safe: 0.42 };
 export const THROW = { min: 4.5, max: 15, pitch: 0.3, cool: 0.5 };
 export const TAYA = { set: 0.55, dive: 0.32, diveBoost: 1.8, recover: 0.5, guardZ: 1.3, count: 1.5 };
-export const POINTS = { knock: 100, save: 50, home: 25, tag: 150 };
+// bonuses: a knock from `FAR` metres or more (backing up is riskier), and each knock in a row without being tagged
+export const POINTS = { knock: 100, save: 50, home: 25, tag: 150, far: 50, streak: 50 };
+export const FAR = 10;
 export const DIFFICULTY = {
   madali: { key: 'madali', name: 'Madali', taya: 3.5, aim: 1.0, dare: 0.8, meter: 1.9, preview: 1, minutes: 3 },
   katamtaman: { key: 'katamtaman', name: 'Katamtaman', taya: 4.3, aim: 0.6, dare: 0.85, meter: 1.45, preview: 0.5, minutes: 3 },
@@ -83,16 +85,19 @@ export function powerFor(fx, fz, tx, tz) {
 
 // ---------- a game ----------
 // demo: every kid plays on their own, for the title screen.
-export function createGame({ seed = 1, difficulty = 'katamtaman', demo = false } = {}) {
+// Options: `minutes` for the length of the afternoon (or `endless`, until you quit), `players` from 3 to 5
+// (you and the CPU kids), and `startTaya` to guard the can yourself first.
+export function createGame({ seed = 1, difficulty = 'katamtaman', demo = false, minutes = null, endless = false, players = 5, startTaya = false } = {}) {
   const diff = DIFFICULTY[difficulty] || DIFFICULTY.katamtaman;
-  const g = { seed, demo, difficulty: diff.key, diff, rs: (seed * 2654435761) >>> 0, t: 0, tick: 0, acc: 0, limit: diff.minutes * 60, phase: 'intro', phaseT: 3.2, score: 0 };
-  g.kids = KIDS.map((d, i) => ({
+  const g = { seed, demo, difficulty: diff.key, diff, rs: (seed * 2654435761) >>> 0, t: 0, tick: 0, acc: 0, limit: endless ? Infinity : (minutes || diff.minutes) * 60, endless: !!endless, phase: 'intro', phaseT: 3.2, score: 0 };
+  const n = clamp(Math.round(players) || 5, 3, KIDS.length);
+  g.kids = KIDS.slice(0, n).map((d, i) => ({
     i, name: d.name, shirt: d.shirt, you: !!d.you, role: 'thrower', x: HOME_SPOTS[i], z: HOME_Z + (i % 2) * 0.4, yaw: Math.PI, speed: 0,
     hasSlip: true, grace: 0, cool: 1 + i * 0.7, dive: 0, recover: 0, out: false, anim: { throwT: 0, tagT: 0 },
-    stats: { knocks: 0, tags: 0, tagged: 0, saves: 0 }, ai: { wait: 1 + rand(g) * 2.5, plan: null },
+    streak: 0, stats: { knocks: 0, tags: 0, tagged: 0, saves: 0, far: 0, homes: 0, bestStreak: 0 }, ai: { wait: 1 + rand(g) * 2.5, plan: null },
   }));
-  // "Maiba taya!": the odd one out guards the can first (never you)
-  const first = 1 + Math.floor(rand(g) * (KIDS.length - 1));
+  // "Maiba taya!": the odd one out guards the can first (never you, unless you asked to)
+  const first = startTaya && !demo ? 0 : 1 + Math.floor(rand(g) * (n - 1));
   becomeTaya(g, g.kids[first], true);
   g.slips = g.kids.map((k) => ({ owner: k.i, state: k.role === 'taya' ? 'none' : 'hand', x: k.x, y: SLIP.hold, z: k.z, vx: 0, vy: 0, vz: 0, spin: 0 }));
   g.can = { state: 'up', x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, tilt: 0, roll: 0, spin: 0, setT: 0, by: -1 };
@@ -178,7 +183,7 @@ function settle(k) { k.speed = 0; }
 
 function throwSlip(g, k, yaw, power, ev) {
   const s = slipOf(g, k), v = throwSpeed(power);
-  s.state = 'air'; s.x = k.x; s.y = SLIP.hold; s.z = k.z;
+  s.state = 'air'; s.x = s.fromX = k.x; s.y = SLIP.hold; s.z = s.fromZ = k.z;
   s.vx = Math.sin(yaw) * Math.cos(THROW.pitch) * v; s.vy = Math.sin(THROW.pitch) * v; s.vz = Math.cos(yaw) * Math.cos(THROW.pitch) * v;
   s.spin = 0; s.bounced = false;
   k.hasSlip = false; k.yaw = yaw; k.cool = THROW.cool; k.anim.throwT = 0.35; k.threwAt = g.t;
@@ -216,9 +221,12 @@ function knock(g, s, ev) {
   s.vx *= -0.15; s.vz *= -0.15; s.vy = Math.min(s.vy, 0.5);
   // everyone caught out in the field is saved: they can walk home while the taya fixes the can
   const saves = g.kids.filter((o) => o !== k && o.role === 'thrower' && !isHome(o)).length;
-  k.stats.knocks++; k.stats.saves += saves;
-  if (k.you) g.score += POINTS.knock + POINTS.save * saves;
-  ev.push({ type: 'knock', kid: k.i, saves, points: k.you ? POINTS.knock + POINTS.save * saves : 0 });
+  const range = dist(s.fromX, s.fromZ, c.x, c.z), far = range >= FAR;
+  k.streak++;
+  k.stats.knocks++; k.stats.saves += saves; k.stats.far += far; k.stats.bestStreak = Math.max(k.stats.bestStreak, k.streak);
+  const points = POINTS.knock + POINTS.save * saves + (far ? POINTS.far : 0) + POINTS.streak * Math.min(k.streak - 1, 3);
+  if (k.you) g.score += points;
+  ev.push({ type: 'knock', kid: k.i, saves, far, range, streak: k.streak, points: k.you ? points : 0 });
 }
 
 function canPhysics(g, ev) {
@@ -282,7 +290,7 @@ function tags(g, ev) {
     if (k === t || !taggable(g, k)) continue;
     if (dist(t.x, t.z, k.x, k.z) > KID.reach) continue;
     // roles swap: the tagged kid guards the can; the old taya gets a slipper and walks home, safe
-    t.stats.tags++; k.stats.tagged++;
+    t.stats.tags++; k.stats.tagged++; k.streak = 0;
     if (t.you) g.score += POINTS.tag;
     ev.push({ type: 'tag', taya: t.i, kid: k.i, points: t.you ? POINTS.tag : 0 });
     t.role = 'thrower'; t.chore = null; t.hasSlip = true; t.grace = 2.5; t.cool = 1; t.dive = 0; t.recover = 0; t.out = false;
@@ -300,7 +308,7 @@ function homecoming(g, ev) {
   for (const k of g.kids) {
     if (k.role !== 'thrower') { k.out = false; continue; }
     if (!isHome(k)) { if (!k.hasSlip || k.grace <= 0) k.out = true; continue; }
-    if (k.out && k.hasSlip) { k.out = false; if (k.you) g.score += POINTS.home; ev.push({ type: 'home', kid: k.i, points: k.you ? POINTS.home : 0 }); }
+    if (k.out && k.hasSlip) { k.out = false; k.stats.homes++; if (k.you) g.score += POINTS.home; ev.push({ type: 'home', kid: k.i, points: k.you ? POINTS.home : 0 }); }
   }
   // picking up your own slipper
   for (const k of g.kids) {

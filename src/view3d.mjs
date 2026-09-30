@@ -6,7 +6,7 @@
 //
 // Two cameras: first person (inside your own body, holding your tsinelas) and a chase camera behind you.
 import * as THREE from './vendor/three.module.min.js';
-import { LINE_Z, CAN, TAYA, predictThrow, isHome, slipOf, taya } from './sim.mjs';
+import { LINE_Z, CAN, TAYA, predictThrow, isHome, slipOf, taya, FIELD } from './sim.mjs';
 import * as T from './tex.mjs';
 import { createPost } from './post.mjs';
 import { dress } from './envpack.mjs';
@@ -205,6 +205,7 @@ export function createView(canvas, { low = false, gfx = null } = {}) {
 
   // ---------- light: a bright afternoon, turning golden toward six ----------
   const hemi = new THREE.HemisphereLight('#e4f1ff', '#bfae94', 2.0);
+  let envPower = 1; // the photographed sky's light, before the evening dims it
   scene.add(hemi);
   const sun = new THREE.DirectionalLight('#fff1dc', 2.7);
   sun.castShadow = true;
@@ -224,6 +225,13 @@ export function createView(canvas, { low = false, gfx = null } = {}) {
   // a photographed sky, once it's loaded, in place of the painted one (and its clouds)
   const backdropMat = new THREE.MeshBasicMaterial({ side: THREE.BackSide, depthWrite: false, fog: false, toneMapped: false });
   const cloudGroup = new THREE.Group(); scene.add(cloudGroup);
+  // the photographed sky fades into a dusk one as six o'clock comes (setDusk gives it)
+  const dusk = { duskMap: { value: null }, duskK: { value: 0 }, duskShift: { value: 0 } };
+  backdropMat.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, dusk);
+    sh.fragmentShader = 'uniform sampler2D duskMap; uniform float duskK, duskShift;\n' + sh.fragmentShader.replace('#include <map_fragment>', '#include <map_fragment>\n  if (duskK > 0.0) diffuseColor.rgb = mix(diffuseColor.rgb, diffuse * texture2D(duskMap, vMapUv + vec2(duskShift, 0.0)).rgb, duskK);');
+  };
+  const setDusk = (tex, shift = 0) => { dusk.duskMap.value = tex; dusk.duskShift.value = shift; };
   const setBackdrop = (tex, turn = 0, bright = 1) => { backdropMat.map = tex; backdropMat.color.setScalar(bright); backdropMat.needsUpdate = true; skyMesh.material = backdropMat; skyMesh.rotation.y = turn; cloudGroup.visible = false; };
   // puffy clouds, far off
   const cloudM = flat('#ffffff', { emissive: '#eef4fa', emissiveIntensity: 0.55, fog: false, roughness: 1 });
@@ -636,12 +644,12 @@ export function createView(canvas, { low = false, gfx = null } = {}) {
   const fpCan = new THREE.Mesh(canMesh.geometry, canMats); fpCan.scale.setScalar(1.25); fp.add(fpCan); fpCan.position.set(0, -0.2, -0.5);
   const fpState = { phase: 0, dip: 0, aimT: 0 };
   // with a real body, the slipper you hold shows in the corner of your eye, the way games show what's in hand
-  const fpHeld = slipperModel(0); fpHeld.scale.setScalar(1.5); fpHeld.traverse((q) => { q.castShadow = false; }); camera.add(fpHeld); fpHeld.visible = false;
+  const fpHeld = slipperModel(0); fpHeld.scale.setScalar(1.2); fpHeld.traverse((q) => { q.castShadow = false; }); camera.add(fpHeld); fpHeld.visible = false;
   function held(me, o, dt) {
     const run = clamp(me.speed / 5, 0, 1.2), bob = o.reduced ? 0 : Math.sin(fpState.phase) * 0.03 * run;
     fpState.phase += dt * (4 + me.speed * 2.2);
     const a = fpState.aimT = o.aim ? Math.min(1, fpState.aimT + dt * 6) : Math.max(0, fpState.aimT - dt * 8);
-    fpHeld.position.set(lerp(0.3, 0.36, a), lerp(-0.34, -0.22, a) + bob, lerp(-0.62, -0.7, a));
+    fpHeld.position.set(lerp(0.32, 0.36, a), lerp(-0.37, -0.23, a) + bob, lerp(-0.64, -0.7, a));
     fpHeld.rotation.set(lerp(1.2, 0.5, a), lerp(-0.4, -0.2, a), lerp(0.25, 0.6, a));
   }
   const pose = (arm, px, py, pz, rx, ry, rz, k) => { arm.g.position.x = lerp(arm.g.position.x, px, k); arm.g.position.y = lerp(arm.g.position.y, py, k); arm.g.position.z = lerp(arm.g.position.z, pz, k); arm.fore.rotation.x = lerp(arm.fore.rotation.x, rx, k); arm.fore.rotation.y = lerp(arm.fore.rotation.y, ry, k); arm.fore.rotation.z = lerp(arm.fore.rotation.z, rz, k); };
@@ -681,7 +689,18 @@ export function createView(canvas, { low = false, gfx = null } = {}) {
 
   // ---------- the camera ----------
   const cam = { yaw: 0, pitch: 0, pos: new THREE.Vector3(0, 2, 13), look: new THREE.Vector3(0, 1.4, -8), shake: 0, firstPerson: false };
-  const tmp = new THREE.Vector3();
+  const tmp = new THREE.Vector3(), bv = new THREE.Vector3();
+
+  // what the kids shout, in a bubble over their heads (the words come from barks.mjs)
+  const barkLayer = document.getElementById('barks');
+  const bubbles = new Map();
+  function bark(i, text) {
+    if (!barkLayer) return;
+    let b = bubbles.get(i);
+    if (!b) { const el = document.createElement('div'); el.className = 'bark'; barkLayer.appendChild(el); b = { el, t: 0 }; bubbles.set(i, b); }
+    b.el.textContent = text; b.t = 2.2;
+    b.el.classList.remove('pop'); void b.el.offsetWidth; b.el.classList.add('pop');
+  }
 
   function resize() {
     const r = canvas.getBoundingClientRect();
@@ -701,7 +720,12 @@ export function createView(canvas, { low = false, gfx = null } = {}) {
     const k = e.kid !== undefined ? g.kids[e.kid] : null;
     switch (e.type) {
       case 'land': emit(e.x, 0.05, e.z, '#e8e0d0', 8, 1.2, 0.8, 0.5); break;
-      case 'knock': emit(0, 0.2, 0, '#fff4c2', 18, 3, 3, 0.6); for (const c of FLAGC) emit(0, 0.5, 0, c, 6, 3.5, 4.5, 1.4, 5); cam.shake = 0.14; cam.flash = 0.7; break;
+      case 'knock': {
+        emit(0, 0.2, 0, '#fff4c2', 18, 3, 3, 0.6); for (const c of FLAGC) emit(0, 0.5, 0, c, 6, 3.5, 4.5, 1.4, 5); cam.shake = 0.14; cam.flash = 0.7;
+        // your knock, in the chase view: a beat on the lata from low and to the side, then back to you
+        if (k && k.you) { const l = Math.hypot(k.x, k.z) || 1, dx = -k.x / l, dz = -k.z / l, side = k.x > 0 ? -1 : 1; cam.knock = { t: 1.1, x: -dz * side * 2.3 - dx * 0.8, z: dx * side * 2.3 - dz * 0.8 }; }
+        break;
+      }
       case 'clang': emit(g.can.x, 0.1, g.can.z, '#ffffff', 6, 1.5, 1, 0.3); break;
       case 'tag': { const t = g.kids[e.taya]; emit(t.x, 1, t.z, '#ff5c5c', 16, 2.5, 2.5, 0.7); cam.shake = g.kids[e.kid].you || t.you ? 0.2 : 0.08; break; }
       case 'canSet': emit(0, 0.1, 0, '#fff4c2', 10, 1, 1.2, 0.5); break;
@@ -711,20 +735,49 @@ export function createView(canvas, { low = false, gfx = null } = {}) {
     }
     // the real kids react: bending for a slipper, sulking when tagged, cheering a knock
     if (e.type === 'pickup') personEvent(kids.get(e.kid), 'pickup');
-    if (e.type === 'tag') personEvent(kids.get(e.kid), 'sulk');
-    if (e.type === 'knock') { cheerT = 2.2; for (const kk of g.kids) if (kk.role === 'thrower' && isHome(kk)) personEvent(kids.get(kk.i), 'cheer'); }
+    if (e.type === 'tag') { personEvent(kids.get(e.kid), 'sulk'); personEvent(kids.get(e.taya), 'cheer', 'taunt'); }
+    if (e.type === 'knock') {
+      cheerT = 2.2;
+      for (const kk of g.kids) if (kk.role === 'thrower' && isHome(kk) && kk.i !== e.kid) personEvent(kids.get(kk.i), 'cheer');
+      personEvent(kids.get(e.kid), 'cheer', Math.random() < 0.5 ? 'victory' : 'jump'); // the one who knocked it, the biggest
+    }
+  }
+
+  // What a kid watches: the can in the air, the kid they're chasing, the taya when they're out, a slipper
+  // in flight, else the can. After the game they all turn to the best player, who turns to the camera.
+  const LOOK = new THREE.Vector3();
+  function lookTarget(g, k, o) {
+    const c = g.can, near = (list) => list.reduce((a, b) => (!a || Math.hypot(b.x - k.x, b.z - k.z) < Math.hypot(a.x - k.x, a.z - k.z) ? b : a), null);
+    if (o.mode === 'over' && o.mvp !== undefined) { const s = g.kids[o.mvp]; return s === k ? LOOK.copy(cam.pos) : LOOK.set(s.x, 1.3, s.z); }
+    if (c.state === 'flying' || c.state === 'rolling') return LOOK.set(c.x, c.y + 0.1, c.z);
+    if (k.role === 'taya') {
+      if (c.state !== 'up') return LOOK.set(c.x, 0.1, c.z);
+      const out = near(g.kids.filter((x) => x.role === 'thrower' && !isHome(x)));
+      return out ? LOOK.set(out.x, 1.2, out.z) : LOOK.set(0, 1.2, LINE_Z + 1);
+    }
+    if (!k.hasSlip) {
+      const t = taya(g), s = slipOf(g, k);
+      if (t && Math.hypot(t.x - k.x, t.z - k.z) < 5) return LOOK.set(t.x, 1.2, t.z);
+      if (s.state === 'ground') return LOOK.set(s.x, 0.05, s.z);
+    }
+    const air = g.slips.find((s) => s.state === 'air');
+    return air ? LOOK.set(air.x, air.y, air.z) : LOOK.set(c.x, 0.15, c.z);
   }
 
   // ---------- each frame ----------
   function frame(g, dt, o = {}) {
     const t = performance.now() / 1000;
-    const day = clamp(g.t / g.limit, 0, 1);
+    // the afternoon: fixed behind the menus; in a game, toward six (with no six o'clock, it lowers over ten minutes and holds)
+    const day = o.mode === 'title' ? 0.3 : g.endless ? Math.min(0.85, g.t / 600) : clamp(g.t / g.limit, 0, 1);
+    dusk.duskK.value = dusk.duskMap.value ? clamp((day - 0.4) / 0.55, 0, 1) ** 1.3 : 0;
     // the afternoon: the sun lowers and warms; at the very end the lamps come on
-    const sunEl = lerp(0.95, 0.5, day), sunAz = -2.4;
+    const gold = day ** 1.6, sunEl = lerp(0.95, 0.5, day), sunAz = -2.4;
     const sd = new THREE.Vector3(Math.cos(sunEl) * Math.sin(sunAz), Math.sin(sunEl), Math.cos(sunEl) * Math.cos(sunAz));
     sun.position.copy(sd).multiplyScalar(50).add(sun.target.position);
-    sun.intensity = lerp(2.7, 2.3, day); sun.color.set('#fff1dc').lerp(new THREE.Color('#ffc890'), day);
-    hemi.intensity = lerp(2.0, 1.6, day);
+    // toward six: a lower, golden sun, a violet sky light, less of the bright afternoon bouncing around
+    sun.intensity = lerp(2.7, 2.2, day); sun.color.set('#fff1dc').lerp(new THREE.Color('#ffa65e'), gold);
+    hemi.intensity = lerp(2.0, 1.35, day); hemi.color.set('#e4f1ff').lerp(new THREE.Color('#c9b4dc'), gold); hemi.groundColor.set('#bfae94').lerp(new THREE.Color('#c89a78'), gold);
+    scene.environmentIntensity = envPower * lerp(1, 0.6, gold);
     skyU.top.value.set('#5ea8ec').lerp(new THREE.Color('#6a8ad0'), day); skyU.mid.value.set('#a9d4f5').lerp(new THREE.Color('#f0c8a0'), day); skyU.low.value.set('#e8f1f4').lerp(new THREE.Color('#ffd8b0'), day);
     skyU.sunDir.value.copy(sd);
     scene.fog.color.set('#dce9f2').lerp(new THREE.Color('#f2d8c0'), day);
@@ -750,11 +803,13 @@ export function createView(canvas, { low = false, gfx = null } = {}) {
       if (m && people && !m.real) { scene.remove(m.root); m = null; }
       if (!m) { m = (people && realKid(k)) || kidModel(k); kids.set(k.i, m); }
       if (m.real) {
-        drivePerson(m, k, g, people, dt, { yaw: k.you && fpNow ? o.camYaw : k.you && o.aim ? o.aim.yaw : k.yaw, aiming: !!(o.aim && k.you), firstPerson: fpNow && k.you });
+        const mvp = o.mode === 'over' && k.i === o.mvp;
+        if (mvp && m.cheerT <= 0) personEvent(m, 'cheer'); // the best of the afternoon, celebrating for the camera
+        drivePerson(m, k, g, people, dt, { yaw: mvp ? Math.atan2(cam.pos.x - k.x, cam.pos.z - k.z) : k.you && fpNow ? o.camYaw : k.you && o.aim ? o.aim.yaw : k.yaw, aiming: !!(o.aim && k.you), firstPerson: fpNow && k.you, look: lookTarget(g, k, o) });
         const tayaNow = k.role === 'taya', near = fpNow && Math.hypot(k.x - me.x, k.z - me.z) < 2.4;
         m.tayaTag.visible = tayaNow && !near && !(fpNow && k.you); m.tayaTag.position.y = m.tagY + 0.22 + Math.sin(t * 4) * 0.05;
-        m.tag.visible = !tayaNow && !(k.you && o.mode === 'play') && !near;
-        m.ring.visible = (k.you && !fpNow) || tayaNow;
+        m.tag.visible = !tayaNow && !(k.you && o.mode === 'play') && !near && !mvp;
+        m.ring.visible = ((k.you && !fpNow) || tayaNow) && o.mode !== 'over';
         m.ring.material.color.set(tayaNow ? '#e8384f' : '#ffd23f');
         m.ring.scale.setScalar(tayaNow && k.count > 0 ? 1 + Math.sin(t * 12) * 0.15 : 1);
         continue;
@@ -835,7 +890,7 @@ export function createView(canvas, { low = false, gfx = null } = {}) {
 
     const shake = cam.shake > 0 && !o.reduced ? cam.shake : 0;
     cam.shake = Math.max(0, cam.shake - dt * 0.8);
-    const fov = camera.aspect < 0.8 ? (fpNow ? 84 : 70) : fpNow ? 72 : 58;
+    const fpFov = o.fov || 72, fov = camera.aspect < 0.8 ? (fpNow ? fpFov + 12 : 70) : fpNow ? fpFov : 58;
     if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
     fpHeld.visible = false;
     if (fpNow) {
@@ -858,28 +913,56 @@ export function createView(canvas, { low = false, gfx = null } = {}) {
       }
       cam.pos.copy(camera.position);
     } else {
-      if (o.mode === 'play' && me) {
+      if (cam.knock && (cam.knock.t -= dt) > 0 && o.mode === 'play' && !o.reduced) {
+        cam.pos.set(cam.knock.x, 0.7, cam.knock.z);
+        cam.look.lerp(tmp.set(c.x, Math.max(0.15, c.y), c.z), Math.min(1, dt * 10));
+      } else if (o.mode === 'play' && me) {
+        cam.knock = null;
         // the chase camera: behind you, turning toward the can unless you've turned it yourself
         if (o.camYaw !== undefined && o.camYaw !== null) cam.yaw = o.camYaw;
         const aiming = !!o.aim;
         const back = aiming ? 2.6 : 5.2, up = aiming ? 1.7 : 2.8, side = aiming ? 0.55 : 0;
         const fx = Math.sin(cam.yaw), fz = Math.cos(cam.yaw);
         tmp.set(me.x - fx * back + fz * side, up, me.z - fz * back - fx * side);
+        // never inside a house: along the wall instead, a little higher
+        const over = Math.max(0, Math.abs(tmp.x) - (FIELD.maxX + 0.1));
+        if (over > 0) { tmp.x = Math.sign(tmp.x) * (FIELD.maxX + 0.1); tmp.y += over * 0.5; }
         cam.pos.lerp(tmp, Math.min(1, dt * (aiming ? 10 : 5)));
         tmp.set(me.x + fx * (aiming ? 4 : 2.2), aiming ? 0.8 : 1.1, me.z + fz * (aiming ? 4 : 2.2));
         cam.look.lerp(tmp, Math.min(1, dt * 8));
       } else {
-        // the menus: standing at the line, looking down the alley
-        const over = o.mode === 'over';
+        // the menus: standing at the line, looking down the alley; after the game, on the best player
+        const over = o.mode === 'over', star = over && o.mvp !== undefined ? g.kids[o.mvp] : null;
+        if (star) {
+          const a = Math.atan2(-star.x * 0.4, 1) + Math.sin(t * 0.3) * 0.35;
+          const px = clamp(star.x + Math.sin(a) * 2.7, FIELD.minX + 0.4, FIELD.maxX - 0.4), pz = clamp(star.z + Math.cos(a) * 2.7, FIELD.minZ, FIELD.maxZ + 1);
+          cam.pos.lerp(tmp.set(px, 1.3, pz), Math.min(1, dt * 2));
+          // on a wide screen the results sit on the left, so the star stands right of centre
+          const dx = star.x - px, dz = star.z - pz, l = Math.hypot(dx, dz) || 1, off = camera.aspect > 1.2 ? 0.85 : 0;
+          cam.look.lerp(tmp.set(star.x + (dz / l) * off, 1.0, star.z - (dx / l) * off), Math.min(1, dt * 3));
+        } else {
         tmp.set(Math.sin(t * 0.07) * 1.4 + (over ? -2 : 0), over ? 2.2 : 1.7, over ? 4.5 : 12.5 + Math.sin(t * 0.05) * 0.6);
         cam.pos.lerp(tmp, Math.min(1, dt * 2));
         cam.look.lerp(tmp.set(Math.sin(t * 0.09) * 0.8, over ? 0.6 : 1.5, over ? 0 : -8), Math.min(1, dt * 2));
+        }
       }
       camera.position.copy(cam.pos);
       camera.position.x += (Math.random() - 0.5) * shake; camera.position.y += (Math.random() - 0.5) * shake;
       camera.lookAt(cam.look);
     }
     if (debug.cam) { camera.position.set(...debug.cam.slice(0, 3)); camera.lookAt(...debug.cam.slice(3, 6)); } // for checking the street up close
+    // the bubbles follow the heads on screen
+    const W = canvas.clientWidth, H = canvas.clientHeight;
+    for (const [i, b] of bubbles) {
+      b.t -= dt;
+      const k = g.kids[i], m = kids.get(i);
+      let on = b.t > 0 && o.mode === 'play' && !!k && !!m && !(fpNow && k.you);
+      if (on) { bv.set(k.x, (m.tagY || 1.9) + 0.5, k.z).project(camera); on = bv.z < 1 && Math.abs(bv.x) < 1.05 && Math.abs(bv.y) < 1.05; }
+      b.el.hidden = !on;
+      if (!on) continue;
+      b.el.style.transform = `translate(${((bv.x + 1) / 2 * W).toFixed(1)}px, ${((1 - bv.y) / 2 * H).toFixed(1)}px) translate(-50%, -100%)`;
+      b.el.style.opacity = String(clamp(b.t / 0.3, 0, 1));
+    }
     cheerT = Math.max(0, cheerT - dt);
     if (onlookers) onlookers.update(t, cheerT > 0 ? 1 : 0);
     cam.flash = Math.max(0, (cam.flash || 0) - dt * 4);
@@ -910,7 +993,7 @@ export function createView(canvas, { low = false, gfx = null } = {}) {
   function setPeople(lib) { people = lib; }
   function setEnv(e) {
     env = e;
-    const ctx = { pmrem, current: () => true, setEnvironment(tex, power, turn) { scene.environment = tex; scene.environmentIntensity = power; scene.environmentRotation.set(0, turn, 0); }, setBackdrop };
+    const ctx = { pmrem, current: () => true, setEnvironment(tex, power, turn) { scene.environment = tex; envPower = power; scene.environmentRotation.set(0, turn, 0); }, setBackdrop, setDusk };
     return dress(env, 'eskinita', { group: world }, ctx).then(async () => {
       // the lata: a real rusted tin
       const info = env.index.props.can_rusted;
@@ -936,7 +1019,7 @@ export function createView(canvas, { low = false, gfx = null } = {}) {
 
   resize();
   const debug = { cam: null };
-  return { frame, resize, event, basis, autoYaw, cam, renderer, post, scene, setPeople, setEnv, setCrowd, debug, get people() { return people; } };
+  return { frame, resize, event, bark, basis, autoYaw, cam, renderer, post, scene, setPeople, setEnv, setCrowd, debug, get people() { return people; } };
 }
 
 function lerpAngle(a, b, k) {

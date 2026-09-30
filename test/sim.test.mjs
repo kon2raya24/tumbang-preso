@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createGame, tick, step, hashState, predictThrow, powerFor, yawTo, throwSpeed, taggable, you, taya, slipOf, isHome,
-  DT, LINE_Z, CAN, KID, POINTS, DIFFICULTY, NOINPUT,
+  DT, LINE_Z, CAN, KID, POINTS, FAR, DIFFICULTY, NOINPUT,
 } from '../src/sim.mjs';
 
 // A game in play, with the AI kids told to stand still unless a test lets them move.
@@ -186,4 +186,44 @@ test('replays are exact, whatever the frame rate', () => {
   for (let k = 0; k < 300; k++) step(d, NOINPUT, 1 / 20);
   assert.equal(hashState(c), hashState(d));
   void CAN;
+});
+
+test('options: the length of the afternoon, endless play, fewer players, and starting as the taya', () => {
+  assert.equal(createGame({ minutes: 8 }).limit, 8 * 60);
+  assert.equal(createGame({ endless: true }).limit, Infinity);
+  const small = createGame({ players: 3 });
+  assert.equal(small.kids.length, 3);
+  assert.equal(small.slips.length, 3);
+  assert.ok(taya(small) && !taya(small).you, 'someone other than you starts as taya');
+  assert.equal(createGame({ players: 9 }).kids.length, 5, 'no more kids than there are');
+  const g = createGame({ startTaya: true, seed: 7 });
+  assert.ok(taya(g).you, 'you guard the can first');
+  // an endless afternoon keeps going; three players still play a full game with knocks and tags
+  const e = started({ endless: true, players: 3 });
+  const ev = run(e, 200);
+  assert.equal(e.phase, 'play');
+  assert.ok(ev.some((x) => x.type === 'throw'), 'the kids throw');
+});
+
+test('knocks in a row and long shots score more; being tagged ends the streak', () => {
+  const g = started(); freeze(g);
+  const me = you(g);
+  const knockFrom = (x, z) => {
+    me.x = x; me.z = z; me.cool = 0; me.hasSlip = true; slipOf(g, me).state = 'hand';
+    Object.assign(g.can, { state: 'up', x: 0, z: 0, y: 0, tilt: 0, vx: 0, vy: 0, vz: 0 });
+    run(g, DT, { ...NOINPUT, throw: { yaw: yawTo(me.x, me.z, 0, 0), power: powerFor(me.x, me.z, 0, 0) } });
+    return run(g, 2.5).find((e) => e.type === 'knock');
+  };
+  const a = knockFrom(0, LINE_Z + 0.5), b = knockFrom(0, LINE_Z + 0.5), c = knockFrom(0, FAR + 0.6);
+  assert.deepEqual([a.streak, b.streak, c.streak], [1, 2, 3]);
+  assert.equal(a.points, POINTS.knock); assert.ok(!a.far);
+  assert.equal(b.points, POINTS.knock + POINTS.streak);
+  assert.ok(c.far && c.range >= FAR);
+  assert.equal(c.points, POINTS.knock + POINTS.far + 2 * POINTS.streak);
+  assert.equal(me.stats.bestStreak, 3); assert.equal(me.stats.far, 1);
+  // tagged: the streak starts over
+  const t = taya(g); Object.assign(g.can, { state: 'up', x: 0, z: 0, y: 0, tilt: 0 }); t.chore = 'guard'; t.count = 0;
+  me.hasSlip = false; slipOf(g, me).state = 'ground'; me.x = 1; me.z = 2; t.x = 1.4; t.z = 2; me.grace = 0;
+  assert.ok(run(g, DT).some((e) => e.type === 'tag' && e.kid === me.i));
+  assert.equal(me.streak, 0);
 });

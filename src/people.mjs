@@ -1,6 +1,7 @@
 // The barkada, real: Mixamo teenagers with motion capture (converted by the Bakbakan tools), driven by
 // the game's state. Each kid idles, walks, runs, winds up and throws, dives and gets up, picks up a
-// slipper, carries the can and sets it down, counts, sulks when tagged and cheers a knock. In first
+// slipper, carries the can and sets it down, counts, flinches and sulks when tagged, and celebrates a knock
+// (cheering, jumping, a fist pump). Their heads turn to what matters, and they lean into their turns. In first
 // person you're inside your own body, head hidden, so you see your own arms and your own throw.
 // Without the files, the view keeps its simple kids.
 import * as THREE from './vendor/three.module.min.js';
@@ -25,7 +26,14 @@ const SLOTS = {
   sad: [[/defeated/i], ['idle']],
   look: [[/looking around/i], ['idle']],
   cheer: [[/^cheering$/i, /victory/i], ['idle']],
+  victory: [[/^victory$/i], ['cheer']],
+  jump: [[/^jump$/i], ['cheer']],
+  taunt: [[/^taunt$/i], ['cheer']],
+  hit: [[/head hit/i, /hit/i], ['sad']],
 };
+// the reactions that play once: which part of the clip, over how long
+const REACT = { jump: [0, 1, 0.93], victory: [0.04, 0.62, 2.3], taunt: [0, 1, 1.63], hit: [0.06, 0.62, 0.6] };
+const CHEERS = ['cheer', 'jump', 'victory'];
 // who plays whom, and how tall
 export const CAST = [
   { id: 'bryce', h: 1.55 }, // Ikaw, in the red shirt
@@ -100,15 +108,16 @@ export function personModel(lib, index, scene, { slipper = null, bandana = true 
     b.rotation.x = Math.PI / 2; b.position.set(0, 0.1, 0.005); b.scale.set(1, 1.12, 1); band = mount(bones.Head, b);
   }
   scene.add(root);
-  return { root, model, mixer, bones, action, layers: [], slip, band, cast, stateKey: '', stateT: 0, loopT: Math.random() * 3, pickT: 0, cheerT: 0, sulkT: 0, setT: 0, yaw: null, headHidden: false };
+  return { root, model, mixer, bones, action, layers: [], slip, band, cast, stateKey: '', stateT: 0, loopT: Math.random() * 3, pickT: 0, cheerT: 0, sulkT: 0, hitT: 0, react: null, setT: 0, yaw: null, headHidden: false, lean: 0, look: { yaw: 0, pitch: 0, w: 0 }, rotZ: model.rotation.z };
 }
 
 // a moment the view saw happen: these play once over what the game is doing
-export function personEvent(m, type) {
+// `cheer` takes a kind ('cheer', 'jump', 'victory' or 'taunt'), or picks one
+export function personEvent(m, type, kind = null) {
   if (!m) return;
   if (type === 'pickup') m.pickT = 0.7;
-  else if (type === 'cheer') m.cheerT = 1.4;
-  else if (type === 'sulk') m.sulkT = 1.1;
+  else if (type === 'cheer') { const c = kind || CHEERS[Math.floor(Math.random() * CHEERS.length)]; m.react = c === 'cheer' ? null : c; m.cheerT = c === 'cheer' ? 1.4 : REACT[c][2]; }
+  else if (type === 'sulk') { m.hitT = REACT.hit[2]; m.sulkT = 1.1; } // the flinch, then the sulk
 }
 
 // This frame's clip (and time) for a kid.
@@ -126,8 +135,9 @@ function plan(m, k, g, lib, o) {
   if (carrying && k.chore === 'setting') return at('set', lerp(0.3, 0.55, 1 - clamp((g.can.setT || 0) / 0.55, 0, 1)));
   if (m.pickT > 0) { const f = 1 - m.pickT / 0.7; return at('pick', f < 0.5 ? lerp(0.06, 0.28, f * 2) : lerp(0.28, 0.5, f * 2 - 1)); }
   if (carrying) { const hold = at('carry', 0.3); if (k.speed <= 0.3) return hold; return { ...(k.speed > 3.4 ? loop('run', 0.75 + k.speed * 0.08) : loop('walk', 0.6 + k.speed * 0.25)), upper: hold }; } // the can in both arms, the legs on the move
+  if (m.hitT > 0) { const [a, b, d] = REACT.hit; return at('hit', lerp(a, b, 1 - m.hitT / d)); }
   if (m.sulkT > 0) return at('sad', lerp(0.05, 0.5, 1 - m.sulkT / 1.1));
-  if (m.cheerT > 0 && k.speed < 0.5) return loop('cheer');
+  if (m.cheerT > 0 && k.speed < 0.5) { if (!m.react) return loop('cheer'); const [a, b, d] = REACT[m.react]; return at(m.react, lerp(a, b, 1 - m.cheerT / d)); }
   if (k.speed > 3.4) return loop('run', 0.75 + k.speed * 0.08);
   if (k.speed > 0.35) return loop('walk', 0.6 + k.speed * 0.25);
   if (k.role === 'taya' && k.count > 0) return loop('look');
@@ -136,13 +146,13 @@ function plan(m, k, g, lib, o) {
 
 // Pose a kid for this frame: crossfade to what they're doing, place them, turn them.
 export function drivePerson(m, k, g, lib, dt, o = {}) {
-  m.pickT = Math.max(0, m.pickT - dt); m.cheerT = Math.max(0, m.cheerT - dt); m.sulkT = Math.max(0, m.sulkT - dt);
+  m.pickT = Math.max(0, m.pickT - dt); m.cheerT = Math.max(0, m.cheerT - dt); m.hitT = Math.max(0, m.hitT - dt); if (m.hitT <= 0) m.sulkT = Math.max(0, m.sulkT - dt);
   m.loopT += dt;
   const want = plan(m, k, g, lib, o);
   const wanted = want.upper
     ? [[m.action(lib.slots[want.slot], 'lower'), want.t], [m.action(lib.slots[want.upper.slot], 'upper'), want.upper.t]]
     : [[m.action(lib.slots[want.slot]), want.t]];
-  const oneShot = want.slot === 'throw' || want.slot === 'dive' || want.slot === 'pick';
+  const oneShot = want.slot === 'throw' || want.slot === 'dive' || want.slot === 'pick' || want.slot === 'hit';
   const fade = oneShot ? 0.06 : 0.16;
   for (const [a, t] of wanted) { let l = m.layers.find((x) => x.a === a); if (!l) { l = { a, w: m.layers.length ? 0 : 1 }; m.layers.push(l); } l.t = t; l.on = true; }
   for (const x of m.layers) { if (!wanted.some(([a]) => a === x.a)) x.on = false; x.w = clamp(x.w + (x.on ? 1 : -1) * dt / fade, 0, 1); }
@@ -155,9 +165,32 @@ export function drivePerson(m, k, g, lib, dt, o = {}) {
   m.mixer.update(0);
   // where they stand and which way they face
   m.root.position.set(k.x, 0, k.z);
-  const yaw = o.yaw ?? k.yaw;
-  m.yaw = m.yaw === null ? yaw : m.yaw + ((((yaw - m.yaw + Math.PI) % TAU) + TAU) % TAU - Math.PI) * Math.min(1, dt * 12);
+  const yaw = o.yaw ?? k.yaw, was = m.yaw ?? yaw;
+  m.yaw = m.yaw === null ? yaw : m.yaw + wrap(yaw - m.yaw) * Math.min(1, dt * 12);
   m.root.rotation.y = m.yaw;
+  // leaning into a turn, more the faster they run (a turn to the left tips them left)
+  const rate = dt > 0 ? wrap(m.yaw - was) / dt : 0;
+  m.lean = lerp(m.lean, clamp(rate * k.speed * 0.012, -0.16, 0.16), Math.min(1, dt * 8));
+  m.model.rotation.z = m.rotZ - m.lean;
+  // the head turns to what matters (the view says what), easing off during a throw, a dive or a pick-up
+  const lk = m.look, busy = oneShot || want.slot === 'set' || want.slot === 'carry' || !!want.upper || !!o.firstPerson;
+  let wy = 0, wp = 0;
+  if (o.look && !busy && m.bones.Head && m.bones.Neck) {
+    m.bones.Head.getWorldPosition(hv);
+    const dx = o.look.x - hv.x, dy = o.look.y - hv.y, dz = o.look.z - hv.z;
+    wy = clamp(wrap(Math.atan2(dx, dz) - m.yaw), -1.1, 1.1); wp = clamp(Math.atan2(dy, Math.hypot(dx, dz)), -0.55, 0.4);
+  }
+  lk.w = clamp(lk.w + ((o.look && !busy) ? dt : -dt) * 4, 0, 1);
+  lk.yaw = lerp(lk.yaw, wy, Math.min(1, dt * 7)); lk.pitch = lerp(lk.pitch, wp, Math.min(1, dt * 7));
+  if (lk.w > 0.001) {
+    m.model.updateMatrixWorld(true);
+    const rx = -Math.cos(m.yaw), rz = Math.sin(m.yaw); // their right, in the world
+    for (const [bone, share] of [[m.bones.Neck, 0.4], [m.bones.Head, 0.6]]) {
+      qa.setFromAxisAngle(UP, lk.yaw * share * lk.w);
+      qb.setFromAxisAngle(ax.set(rx, 0, rz), lk.pitch * share * lk.w);
+      turnBone(bone, qa.multiply(qb));
+    }
+  }
   if (m.slip) m.slip.visible = k.role === 'thrower' && k.hasSlip;
   if (m.band) m.band.visible = k.role === 'taya';
   // first person: the head goes, so the camera can sit where the eyes were
@@ -166,6 +199,9 @@ export function drivePerson(m, k, g, lib, dt, o = {}) {
 }
 
 // Where a kid's eyes are (for the first-person camera), and their hands (for the can they carry).
-const hv = new THREE.Vector3();
+const hv = new THREE.Vector3(), ax = new THREE.Vector3(), UP = new THREE.Vector3(0, 1, 0), qa = new THREE.Quaternion(), qb = new THREE.Quaternion(), qp = new THREE.Quaternion();
+const wrap = (a) => ((((a + Math.PI) % TAU) + TAU) % TAU) - Math.PI;
+// turn a bone by a rotation given in the world: local = parent⁻¹ · q · parent · local
+function turnBone(bone, q) { bone.parent.getWorldQuaternion(qp); bone.quaternion.premultiply(qp).premultiply(q).premultiply(qp.invert()); bone.updateMatrixWorld(true); }
 export function eyesOf(m, out) { m.model.updateMatrixWorld(true); const h = m.bones.Head; h.getWorldPosition(out); out.y += 0.07; return out; }
 export function handsOf(m, out) { m.model.updateMatrixWorld(true); m.bones.LeftHand.getWorldPosition(out); m.bones.RightHand.getWorldPosition(hv); return out.add(hv).multiplyScalar(0.5); }
