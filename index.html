@@ -77,7 +77,7 @@ button.primary { background: linear-gradient(180deg, #fff0a0, #ffd23f 45%, #e89a
 .modes button { min-height: 38px; padding: 4px 14px; font-size: 15px; }
 .modes button[aria-pressed=true] { background: linear-gradient(180deg, #ff7a6a, #c0182e); border-color: #ffd0c8; }
 .sound { min-width: 44px; padding: 6px 10px; font-size: 18px; }
-.calm { font-size: 13px; min-height: 34px; padding: 2px 12px; }
+.calm, .gfx { font-size: 13px; min-height: 34px; padding: 2px 12px; }
 .muted { color: var(--ink); margin: 0; font-size: 14px; text-shadow: 0 1px 2px rgba(0,0,0,.8), 0 0 6px rgba(0,0,0,.5); }
 .card { background: linear-gradient(180deg, rgba(34,24,42,.9), rgba(16,10,20,.92)); border: 1px solid rgba(216,201,160,.6); border-radius: 4px; padding: 14px 18px; max-width: 520px; text-align: left; box-shadow: 0 0 0 2px #120d14, 0 10px 30px rgba(0,0,0,.5); backdrop-filter: blur(6px); }
 .card ol { margin: 6px 0; padding-left: 20px; }
@@ -132,7 +132,7 @@ body.playing .help { display: none; }
     </div>
     <p class="muted" id="title-best"></p>
     <p class="muted">🎮 Works with a PlayStation or any controller · keyboard · touch</p>
-    <button type="button" class="calm" aria-pressed="false"></button>
+    <button type="button" class="calm" aria-pressed="false"></button> <button type="button" class="gfx"></button>
   </section>
 
   <section class="screen" id="how" hidden>

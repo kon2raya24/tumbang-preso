@@ -20,6 +20,7 @@ const data = {
   best: saved.best && typeof saved.best === 'object' ? saved.best : {}, muted: !!saved.muted, calm: !!saved.calm,
   difficulty: DIFFICULTY[saved.difficulty] ? saved.difficulty : 'madali', hints: Array.isArray(saved.hints) ? saved.hints : [], how: !!saved.how,
   view: saved.view === 'chase' ? 'chase' : 'fp',
+  gfx: [0, 1, 2].includes(saved.gfx) ? saved.gfx : 'auto', // graphics: auto (steps down on slow devices) or a fixed level
 };
 const firstPerson = () => data.view === 'fp';
 const persist = () => store.set(data);
@@ -238,7 +239,7 @@ function onEvent(e) {
   const me = you(game), mine = e.kid === me.i;
   switch (e.type) {
     case 'go': A.start(); break;
-    case 'knock': if (mine) { toast('NATUMBA!', `+${e.points}${e.saves ? ` · SALBA ×${e.saves}` : ''}`); buzz(40); } else if (me.role === 'thrower' && !me.hasSlip) toast(`Natumba ni ${game.kids[e.kid].name}!`, 'Kunin na ang tsinelas mo!'); else if (me.role === 'taya') toast('Natumba ang lata!', 'Itayo mo agad sa bilog!'); break;
+    case 'knock': slowT = 0.75; if (mine) { toast('NATUMBA!', `+${e.points}${e.saves ? ` · SALBA ×${e.saves}` : ''}`); buzz(40); } else if (me.role === 'thrower' && !me.hasSlip) toast(`Natumba ni ${game.kids[e.kid].name}!`, 'Kunin na ang tsinelas mo!'); else if (me.role === 'taya') toast('Natumba ang lata!', 'Itayo mo agad sa bilog!'); break;
     case 'tag':
       if (e.kid === me.i || e.taya === me.i) cam.turnTo = view.autoYaw(game);
       if (e.kid === me.i) { toast('TAYA KA!', `Nahuli ka ni ${game.kids[e.taya].name}.`, 1800); buzz([60, 40, 60]); hint('taya', 'Ikaw ang taya: habulin ang nasa labas ng linya habang nakatayo ang lata. Kapag natumba, itayo muna!'); }
@@ -288,6 +289,7 @@ function labels() {
   for (const b of document.querySelectorAll('.sound')) { b.textContent = data.muted ? '🔇' : '🔊'; b.setAttribute('aria-label', data.muted ? 'Sound off, turn it on' : 'Sound on, turn it off'); }
   for (const b of document.querySelectorAll('.calm')) { b.setAttribute('aria-pressed', String(data.calm)); b.textContent = data.calm ? 'Bawas-yanig: on' : 'Bawas-yanig: off'; }
   for (const b of document.querySelectorAll('[data-diff]')) b.setAttribute('aria-pressed', String(b.dataset.diff === data.difficulty));
+  for (const b of document.querySelectorAll('.gfx')) b.textContent = `Graphics: ${{ auto: 'Auto', 2: 'Mataas', 1: 'Katamtaman', 0: 'Mababa' }[data.gfx]}`;
   $('view-btn').textContent = firstPerson() ? '1P' : '3P';
   $('view-btn').setAttribute('aria-label', firstPerson() ? 'First-person camera: switch to the chase camera' : 'Chase camera: switch to first person');
   $('diff-note').textContent = { madali: 'Madali: mabagal ang taya, kita ang buong arko ng bato.', katamtaman: 'Katamtaman: kalahating arko lang, mas mabilis ang taya.', mahirap: 'Mahirap: walang arko, mabilis at matalas ang taya.' }[data.difficulty];
@@ -296,6 +298,7 @@ function labels() {
 }
 for (const b of document.querySelectorAll('.sound')) b.onclick = toggleSound;
 for (const b of document.querySelectorAll('.calm')) b.onclick = () => { data.calm = !data.calm; persist(); labels(); };
+for (const b of document.querySelectorAll('.gfx')) b.onclick = () => { const order = ['auto', 2, 1, 0]; data.gfx = order[(order.indexOf(data.gfx) + 1) % order.length]; persist(); labels(); if (!view) return; if (data.gfx === 'auto') { view.post.setAuto(true); view.post.setLevel(touch ? 1 : 2); } else { view.post.setAuto(false); view.post.setLevel(data.gfx); } };
 for (const b of document.querySelectorAll('[data-diff]')) b.onclick = () => { data.difficulty = b.dataset.diff; persist(); labels(); };
 $('play').onclick = start;
 $('how-ok').onclick = () => { data.how = true; persist(); start(); };
@@ -309,13 +312,14 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) pause
 labels();
 
 // ---------- loop ----------
-let last = performance.now();
+let last = performance.now(), slowT = 0;
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   if (mode === 'play') {
     const input = gather(dt);
-    for (const e of step(game, input, dt)) onEvent(e);
+    slowT = Math.max(0, slowT - dt);
+    for (const e of step(game, input, slowT > 0 ? dt * 0.35 : dt)) onEvent(e); // a beat of slow motion when the lata goes down
     cam.manual += dt;
     const me = you(game), moving = me.speed > 0.5 && !aim;
     if (firstPerson()) {
@@ -343,7 +347,7 @@ function frame(now) {
 async function boot() {
   // the canvas labels need the webfont
   try { await Promise.race([document.fonts.load('800 34px "Baloo 2"'), new Promise((r) => setTimeout(r, 1500))]); } catch { /* fall back to system fonts */ }
-  try { view = createView($('view'), { low: touch, gfx: Q.get('gfx') }); }
+  try { view = createView($('view'), { low: touch, gfx: Q.get('gfx') ?? (data.gfx === 'auto' ? null : String(data.gfx)) }); }
   catch {
     $('title').innerHTML = '<h1 class="logo">TUMBANG PRESO</h1><p class="tag">Kailangan ng laro ang 3D (WebGL), pero hindi ito mabuksan sa browser na ito. Subukan sa Chrome, Edge, Safari o Firefox, o i-on ang hardware acceleration.</p>';
     show('title');

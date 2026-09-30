@@ -701,7 +701,7 @@ export function createView(canvas, { low = false, gfx = null } = {}) {
     const k = e.kid !== undefined ? g.kids[e.kid] : null;
     switch (e.type) {
       case 'land': emit(e.x, 0.05, e.z, '#e8e0d0', 8, 1.2, 0.8, 0.5); break;
-      case 'knock': emit(0, 0.2, 0, '#fff4c2', 18, 3, 3, 0.6); for (const c of FLAGC) emit(0, 0.5, 0, c, 6, 3.5, 4.5, 1.4, 5); cam.shake = 0.14; break;
+      case 'knock': emit(0, 0.2, 0, '#fff4c2', 18, 3, 3, 0.6); for (const c of FLAGC) emit(0, 0.5, 0, c, 6, 3.5, 4.5, 1.4, 5); cam.shake = 0.14; cam.flash = 0.7; break;
       case 'clang': emit(g.can.x, 0.1, g.can.z, '#ffffff', 6, 1.5, 1, 0.3); break;
       case 'tag': { const t = g.kids[e.taya]; emit(t.x, 1, t.z, '#ff5c5c', 16, 2.5, 2.5, 0.7); cam.shake = g.kids[e.kid].you || t.you ? 0.2 : 0.08; break; }
       case 'canSet': emit(0, 0.1, 0, '#fff4c2', 10, 1, 1.2, 0.5); break;
@@ -882,7 +882,8 @@ export function createView(canvas, { low = false, gfx = null } = {}) {
     if (debug.cam) { camera.position.set(...debug.cam.slice(0, 3)); camera.lookAt(...debug.cam.slice(3, 6)); } // for checking the street up close
     cheerT = Math.max(0, cheerT - dt);
     if (onlookers) onlookers.update(t, cheerT > 0 ? 1 : 0);
-    post.render(dt);
+    cam.flash = Math.max(0, (cam.flash || 0) - dt * 4);
+    post.render(dt, { flash: o.reduced ? 0 : cam.flash * 0.6, split: o.reduced ? 0 : cam.flash * 0.8 });
   }
 
   // The yaw the camera should settle to: looking from you toward the can (or, as taya, toward the kids).
