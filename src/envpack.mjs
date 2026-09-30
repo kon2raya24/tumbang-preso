@@ -25,7 +25,7 @@ const PLACES = {
     ['plastic_crate_01', -7.3, 0, -7.9, 0.3, 1], ['plastic_crate_01', -7.28, 0.26, -7.95, -0.2, 1], ['wooden_crate_01', 7.3, 0, 12.9, -L, 1],
     ['trashbag', -7.3, 0, 3.4, 0.2, 1], ['trashbag', -7.1, 0, 4.0, 1.4, 0.9], ['cardboard_box_01', -7.3, 0, 4.6, 0.4, 1],
     ['old_tyre', -7.45, 0, -13.8, L, 1], ['plastic_broom', 7.5, 0, 8.4, -L, 1], ['plastic_jerrycan', -7.35, 0, -11.5, 0.8, 1], ['wooden_bucket_01', 7.35, 0, 15.6, 0, 1],
-    ['folding_wooden_stool', 4.4, 0, -12.6, 0.5, 1], ['wooden_stool_01', -7.2, 0, 8.8, 0.2, 1],
+    ['folding_wooden_stool', 4.4, 0, -12.6, 0.5, 1], ['wooden_stool_01', -7.2, 0, 4.8, 0.2, 1],
     // on the walls: aircon units, a meter box
     ['exterior_aircon_unit', -W + 0.2, 3.6, -9.5, L, 0.7], ['exterior_aircon_unit', W - 0.2, 3.8, 8.5, -L, 0.7], ['exterior_aircon_unit', -W + 0.2, 4.1, 14, L, 0.7], ['utility_box_02', W - 0.22, 1.2, 10.8, -L, 0.8],
     // the ground: a manhole; trees past the cross street

@@ -925,7 +925,7 @@ export function createView(canvas, { low = false, gfx = null } = {}) {
     const R2 = Math.PI / 2;
     const spots = [
       { x: 7.1, y: 0.45, z: -5.5, stand: false, face: -R2 + 0.3 }, { x: 7.05, y: 0.45, z: -4.7, stand: false, face: -R2 - 0.2 }, { x: 7.3, y: 0.42, z: -2.6, stand: false, face: -R2 },
-      { x: 7.2, y: 0, z: -1.9, stand: true, face: -R2 + 0.4 }, { x: -7.1, y: 0, z: 9.6, stand: true, face: R2 - 0.5 }, { x: -7.15, y: 0.44, z: 8.8, stand: false, face: R2 - 0.3 },
+      { x: 7.2, y: 0, z: -1.9, stand: true, face: -R2 + 0.4 }, { x: -7.1, y: 0, z: 5.6, stand: true, face: R2 - 0.5 }, { x: -7.15, y: 0.44, z: 4.8, stand: false, face: R2 - 0.3 },
       { x: 6.9, y: 0, z: 14.2, stand: true, face: -R2 - 0.6 }, { x: -6.9, y: 0, z: -15.4, stand: true, face: R2 + 0.4 }, { x: 4.9, y: 0, z: -12.0, stand: true, face: -2.6 },
       { x: -2.8, y: 0, z: -22.5, stand: true, face: 0.1 }, { x: 3.4, y: 0, z: -23, stand: true, face: -0.2 }, { x: -7.0, y: 0, z: 2.2, stand: true, face: R2 },
     ];
