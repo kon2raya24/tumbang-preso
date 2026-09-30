@@ -1,12 +1,15 @@
-// Synthesized sound for Tumbang Preso: a playful street tune, the whoosh of a thrown tsinelas, the
-// "pak!" when it lands, the clang of the lata, footsteps, the taya's count, and Nanay's bell at six.
-// Nothing plays until start() runs from a user gesture.
+// Sound for Tumbang Preso. Real recordings (CC0, from Kenney): the tin lata knocked and clattering, the
+// slap of a rubber tsinelas, footsteps on concrete, a dive, a tag. Around them, synthesized: a playful
+// street tune, the whoosh of a throw, the neighbours murmuring and cheering, the taya's count, and
+// Nanay's bell at six. Nothing plays until start() runs from a user gesture; the recordings load then.
+const SAMPLES = { tin: 5, metal: 5, slap: 5, step_concrete: 5, soft_m: 3, soft_h: 2, punch_m: 2 };
 const NOTE = (n) => 440 * 2 ** ((n - 69) / 12);
 const TUNE = [[72, 76, 79, 76], [74, 77, 81, 77], [72, 76, 79, 84], [79, 77, 74, 71]];
 const BASS = [48, 50, 45, 43];
 
-export function createAudio() {
-  let ctx = null, master = null, music = null, sfx = null, noise = null, muted = false;
+export function createAudio({ base = 'assets/sfx/' } = {}) {
+  let ctx = null, master = null, music = null, sfx = null, noise = null, muted = false, murmur = null;
+  const buf = {};
   let step = 0, nextAt = 0, playing = false, tempo = 112, stepT = 0;
 
   function start() {
@@ -18,7 +21,24 @@ export function createAudio() {
     noise = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
     const d = noise.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
     setInterval(schedule, 50);
+    for (const [k, n] of Object.entries(SAMPLES)) for (let i = 0; i < n; i++) fetch(`${base}${k}${i}.mp3`).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject())).then((a) => ctx.decodeAudioData(a)).then((b) => { buf[k + i] = b; }).catch(() => { /* synth only */ });
+    // the barangay in the afternoon: people talking somewhere, swelling and falling
+    const src = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+    src.buffer = noise; src.loop = true; f.type = 'bandpass'; f.frequency.value = 600; f.Q.value = 0.7; g.gain.value = 0;
+    src.connect(f).connect(g).connect(master); src.start(); murmur = g;
   }
+  // one of a recording's takes, a little higher or lower each time
+  function play(name, gain = 1, rate = 1, vary = 0.08, when = 0) {
+    if (!ctx || muted) return false;
+    const takes = Array.from({ length: SAMPLES[name] || 0 }, (_, i) => buf[name + i]).filter(Boolean);
+    if (!takes.length) return false;
+    const s = ctx.createBufferSource(), g = ctx.createGain();
+    s.buffer = takes[Math.floor(Math.random() * takes.length)]; s.playbackRate.value = rate * (1 + (Math.random() * 2 - 1) * vary);
+    g.gain.value = gain; s.connect(g).connect(sfx); s.start(ctx.currentTime + when);
+    return true;
+  }
+  // the neighbours: a cheer, bigger for a knock
+  function cheer(big) { hiss(big ? 1.8 : 0.9, 700, big ? 0.12 : 0.05, 0, 'bandpass', 900); hiss(big ? 1.5 : 0.7, 2200, big ? 0.05 : 0.02, 0, 'bandpass'); }
   function tone(freq, dur, type = 'triangle', gain = 0.05, when = 0, bend = 0, out = sfx) {
     if (!ctx || muted) return;
     const t = ctx.currentTime + when, o = ctx.createOscillator(), g = ctx.createGain();
@@ -61,7 +81,8 @@ export function createAudio() {
       music.gain.setTargetAtTime(live ? 0.8 : 0, ctx.currentTime, 0.3);
       tempo = 108 + Math.floor((g ? g.t / g.limit : 0) * 24);
       const me = g && g.kids.find((k) => k.you);
-      if (live && me && me.speed > 1 && (stepT -= dt) <= 0) { stepT = 1.6 / me.speed; hiss(0.04, 900, 0.035, 0, 'lowpass'); }
+      if (live && me && me.speed > 1 && (stepT -= dt) <= 0) { stepT = 1.6 / me.speed; if (!play('step_concrete', 0.35, 1, 0.12)) hiss(0.04, 900, 0.035, 0, 'lowpass'); }
+      if (murmur) murmur.gain.setTargetAtTime(live ? 0.035 + Math.sin(ctx.currentTime * 0.3) * 0.015 : 0.02, ctx.currentTime, 0.8);
     },
     event(e, g) {
       if (!ctx || muted) return;
@@ -69,12 +90,12 @@ export function createAudio() {
       switch (e.type) {
         case 'go': tone(1800, 0.25, 'sine', 0.05, 0, 1.1); tone(1800, 0.4, 'sine', 0.05, 0.3, 1.2); break; // a whistle
         case 'throw': hiss(0.3, 700, mine ? 0.1 : 0.04, 0, 'bandpass', 2500); break;
-        case 'bounce': case 'land': hiss(0.06, 1800, 0.06); tone(180, 0.06, 'square', 0.02); break; // pak!
-        case 'knock': clang(0, 0.07); [0, 4, 7, 12].forEach((k, i) => tone(NOTE(72 + k), 0.12, 'square', mine ? 0.04 : 0.02, 0.15 + i * 0.07)); break;
-        case 'clang': clang(0, 0.03); break;
-        case 'canSet': tone(300, 0.08, 'square', 0.04); clang(0.05, 0.02); break;
-        case 'tag': tone(520, 0.18, 'triangle', 0.07, 0, 0.5); tone(260, 0.3, 'square', 0.03, 0.12, 0.7); break;
-        case 'dive': hiss(0.25, 400, 0.08, 0, 'lowpass'); break;
+        case 'bounce': case 'land': if (!play('slap', e.type === 'land' ? 0.7 : 0.45, 1.25)) { hiss(0.06, 1800, 0.06); tone(180, 0.06, 'square', 0.02); } break; // pak!
+        case 'knock': if (!play('tin', 1.2, 1)) clang(0, 0.07); play('metal', 0.5, 1.4); [0, 4, 7, 12].forEach((k, i) => tone(NOTE(72 + k), 0.12, 'square', mine ? 0.04 : 0.02, 0.15 + i * 0.07)); cheer(true); break;
+        case 'clang': if (!play('tin', 0.45, 1.15)) clang(0, 0.03); break;
+        case 'canSet': if (!play('metal', 0.5, 0.9)) { tone(300, 0.08, 'square', 0.04); clang(0.05, 0.02); } break;
+        case 'tag': play('punch_m', 0.6, 1.3); tone(520, 0.18, 'triangle', 0.07, 0, 0.5); tone(260, 0.3, 'square', 0.03, 0.12, 0.7); cheer(false); break;
+        case 'dive': if (!play('soft_h', 0.8, 0.9)) hiss(0.25, 400, 0.08, 0, 'lowpass'); hiss(0.25, 400, 0.04, 0, 'lowpass'); break;
         case 'pickup': [0, 7].forEach((k, i) => tone(NOTE(79 + k), 0.08, 'triangle', 0.04, i * 0.05)); break;
         case 'home': [0, 4, 7].forEach((k, i) => tone(NOTE(76 + k), 0.1, 'triangle', 0.05, i * 0.06)); break;
         case 'count': tone(e.n === 0 ? 880 : 660, 0.12, 'square', 0.04); break;

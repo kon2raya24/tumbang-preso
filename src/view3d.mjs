@@ -1,10 +1,18 @@
 // The 3D eskinita for Tumbang Preso, in three.js. It reads the simulation (sim.mjs) and its events and
-// never changes them. Everything is built from simple shapes and small canvas textures drawn pixel by
-// pixel and magnified without smoothing, for a chunky, sunny look: no model or image files.
+// never changes them. The street is built in code with painted, relief-mapped house fronts, and then
+// dressed with real scans (envpack.mjs): concrete, asphalt, roofing, props, a photographed sky. The
+// kids are real motion-captured teenagers (people.mjs). The frame goes through the film look (post.mjs).
+// Without those files it all still stands, simpler.
 //
-// Two cameras: first person (your own hands, holding your tsinelas) and a chase camera behind you.
+// Two cameras: first person (inside your own body, holding your tsinelas) and a chase camera behind you.
 import * as THREE from './vendor/three.module.min.js';
-import { LINE_Z, CAN, predictThrow, isHome, slipOf, taya } from './sim.mjs';
+import { LINE_Z, CAN, TAYA, predictThrow, isHome, slipOf, taya } from './sim.mjs';
+import * as T from './tex.mjs';
+import { createPost } from './post.mjs';
+import { dress } from './envpack.mjs';
+import { personModel, drivePerson, personEvent, eyesOf, handsOf } from './people.mjs';
+import { buildCrowd } from './crowd.mjs';
+import { GLTFLoader } from './vendor/three-mocap.min.js';
 
 const TAU = Math.PI * 2;
 const lerp = (a, b, k) => a + (b - a) * k;
@@ -24,9 +32,9 @@ const pick = (a) => a[Math.floor(rnd() * a.length)];
 const shade = (hex, k) => { const n = parseInt(hex.slice(1), 16), f = (v) => clamp(Math.round(v * k), 0, 255); return `rgb(${f(n >> 16)},${f((n >> 8) & 255)},${f(n & 255)})`; };
 const R = (x, c, X, Y, W = 1, H = 1) => { x.fillStyle = c; x.fillRect(Math.round(X), Math.round(Y), Math.round(W), Math.round(H)); };
 
-function canvasTex(w, h, draw, { repeat = null, pixel = true } = {}) {
-  const c = document.createElement('canvas'); c.width = w; c.height = h;
-  const x = c.getContext('2d'); x.imageSmoothingEnabled = false;
+function canvasTex(w, h, draw, { repeat = null, pixel = false, scale = 3 } = {}) {
+  const c = document.createElement('canvas'); c.width = Math.round(w * scale); c.height = Math.round(h * scale);
+  const x = c.getContext('2d'); x.imageSmoothingEnabled = !pixel; x.scale(scale, scale);
   draw(x, w, h);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
@@ -36,7 +44,13 @@ function canvasTex(w, h, draw, { repeat = null, pixel = true } = {}) {
 }
 const MATS = new Map();
 const mat = (color, o = {}) => { const key = color + JSON.stringify(o); if (!MATS.has(key)) MATS.set(key, new THREE.MeshStandardMaterial({ color, roughness: 0.9, metalness: 0, ...o })); return MATS.get(key); };
-const flat = (color, o = {}) => mat(color, { flatShading: true, ...o });
+const flat = (color, o = {}) => mat(color, o); // smooth, now: the street is realistic
+// `surface` names the scanned material that can replace this one (envpack.mjs), and the size it covers
+const tag = (m, kind, w, h, extra = {}) => { m.userData.surface = { kind, w, h, ...extra }; return m; };
+const standIn = (m) => { m.userData.standIn = true; return m; }; // a real prop replaces it once loaded
+// plaster over hollow blocks, in a house's colour: one material per colour
+const WALLM = new Map();
+const wallMat = (color) => { if (!WALLM.has(color)) { const c = T.concrete(WALLM.size + 3, color, { size: 256, repeat: [2, 2] }); WALLM.set(color, tag(new THREE.MeshStandardMaterial({ map: c.map, normalMap: c.normalMap, roughness: 0.92 }), 'plaster', 4, 3, { detail: true })); } return WALLM.get(color); };
 function mesh(geo, material, { x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0, cast = true, receive = false } = {}) {
   const m = new THREE.Mesh(geo, material);
   m.position.set(x, y, z); m.rotation.set(rx, ry, rz);
@@ -79,18 +93,14 @@ function label(text, color = '#fff8e1', bg = 'rgba(20,16,24,0.7)', scale = 0.9) 
   const tex = canvasTex(256, 64, (x, w, h) => {
     x.fillStyle = bg; x.beginPath(); x.roundRect(8, 8, w - 16, h - 16, 24); x.fill();
     x.fillStyle = color; x.font = '800 34px "Baloo 2", system-ui, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(text, w / 2, h / 2 + 2);
-  }, { pixel: false });
+  }, { pixel: false, scale: 1 });
   const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
   s.scale.set(scale, scale / 4, 1); s.renderOrder = 10;
   return s;
 }
 // A small painted sign, lettered at low resolution so it matches the walls.
 function signTex(lines, bg, fg, w = 120, h = 36) {
-  return canvasTex(w, h, (x) => {
-    R(x, bg, 0, 0, w, h); R(x, shade(bg, 0.7), 0, h - 2, w, 2);
-    x.fillStyle = fg; x.textAlign = 'center'; x.textBaseline = 'middle';
-    lines.forEach(([text, size, weight = 800], k) => { x.font = `${weight} ${size}px "Baloo 2", system-ui, sans-serif`; x.fillText(text, w / 2, h * (lines.length === 1 ? 0.54 : 0.34 + k * 0.4), w - 6); });
-  });
+  return T.sign(lines.map(([text, size, weight]) => [text, (size * 32) / h, weight]), bg, fg, { w: w * 4, h: h * 4 }); // lettered crisp, a little weathered
 }
 
 // ---------- the pixel painting of walls, windows and gates ----------
@@ -155,34 +165,32 @@ function drawStore(x, X, Y, W, H) {
   R(x, '#8a5a30', X - 1, Y + H, W + 2, 2); // the counter
 }
 
-// One storey of a house front, painted to size.
+// One storey of a house front, painted at size (tex.mjs): plaster, windows with grilles and sills, a door,
+// a store's roll-up shutter and its shelves; then a steel gate where the house has one. Its own relief.
 function storeyTex(wm, hm, s) {
-  const w = Math.round(wm * PX), h = Math.round(hm * PX);
-  return canvasTex(w, h, (x) => {
-    drawWall(x, w, h, s.kind, s.color);
-    R(x, shade(s.trim, 1), 0, 0, w, 1);
-    const win = (cx, wy) => drawWindow(x, cx - 9, h - wy, 18, 15, s.trim, s.grille, rnd() < 0.5 ? pick(['#e8384f', '#ffd23f', '#3fae5a', '#ff8ae2', '#6fa6e0']) : null);
-    if (s.floor === 0) {
-      if (s.store) { drawStore(x, Math.round(w * 0.18), h - 34, Math.round(w * 0.56), 22); drawDoor(x, w - 22, h - 34, 15, 34, '#7a4a2a'); }
-      else if (s.door === 'gate') { const gw = Math.min(40, Math.round(w * 0.5)); drawGate(x, s.flip ? w - gw - 4 : 4, h - 36, gw, 36, s.gate); win(s.flip ? 20 : w - 18, 34); }
-      else { drawDoor(x, s.flip ? w - 22 : 7, h - 34, 15, 34, s.gate); win(s.flip ? 22 : w - 20, 34); }
-    } else {
-      const n = w > 70 ? 2 : 1;
-      for (let r = 0; r * 44 + 30 < h; r++) for (let k = 0; k < n; k++) win(n === 1 ? w / 2 : w * (0.28 + k * 0.44), 30 + r * 44);
-    }
-    if (s.poster) { const px0 = Math.round(rnd() * (w - 12)); R(x, '#f4f1e6', px0, h - 22, 9, 12); R(x, pick(['#e8384f', '#2f6fd6']), px0 + 1, h - 21, 7, 4); R(x, '#555', px0 + 2, h - 15, 5, 1); R(x, '#555', px0 + 2, h - 13, 4, 1); }
-    stains(x, w, h);
-  });
+  const f = T.facade(Math.floor(rnd() * 1e6), wm, hm, s.color, { shop: !!(s.store && s.floor === 0) });
+  if (s.floor === 0 && s.door === 'gate' && !s.store) {
+    const cv = f.map.image, x = cv.getContext('2d'), PXM = cv.width / wm, gw = Math.min(2.6, wm * 0.45) * PXM, gh = 2.4 * PXM, gx = s.flip ? cv.width - gw - 0.3 * PXM : 0.3 * PXM, gy = cv.height - gh;
+    const g = x.createLinearGradient(0, gy, 0, gy + gh); g.addColorStop(0, T.shade(s.gate, 1.15)); g.addColorStop(1, T.shade(s.gate, 0.8));
+    x.fillStyle = g; x.fillRect(gx, gy, gw, gh);
+    x.fillStyle = 'rgba(0,0,0,0.28)'; for (let k = gx + 6; k < gx + gw; k += 10) x.fillRect(k, gy + 10, 3, gh - 14); // the bars
+    x.fillStyle = 'rgba(255,255,255,0.25)'; x.fillRect(gx, gy + gh * 0.3, gw, 4); x.fillRect(gx, gy + gh * 0.62, gw, 4);
+    x.fillStyle = '#1a1a1a'; x.fillRect(gx + gw / 2 - 1.5, gy, 3, gh);
+    x.fillStyle = 'rgba(120,60,30,0.35)'; for (let k = 0; k < 8; k++) x.fillRect(gx + rnd() * gw, gy + gh - 20 - rnd() * 40, 4 + rnd() * 10, 6 + rnd() * 20); // rust
+    f.map.needsUpdate = true;
+  }
+  if (s.poster) { const cv = f.map.image, x = cv.getContext('2d'), X = rnd() * (cv.width - 60); x.fillStyle = '#f4f1e6'; x.fillRect(X, cv.height - 110, 44, 60); x.fillStyle = pick(['#e8384f', '#2f6fd6']); x.fillRect(X + 4, cv.height - 106, 36, 18); x.fillStyle = '#555'; x.fillRect(X + 6, cv.height - 80, 30, 3); x.fillRect(X + 6, cv.height - 72, 24, 3); f.map.needsUpdate = true; }
+  return f;
 }
 
-export function createView(canvas, { low = false } = {}) {
+export function createView(canvas, { low = false, gfx = null } = {}) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: !low, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, low ? 1.25 : 2));
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.NeutralToneMapping;
-  renderer.toneMappingExposure = 1.0;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
   const scene = new THREE.Scene();
   scene.fog = new THREE.Fog('#dce9f2', 30, 95);
   const world = new THREE.Group(); scene.add(world);
@@ -191,6 +199,9 @@ export function createView(canvas, { low = false } = {}) {
   const camera = new THREE.PerspectiveCamera(70, 1, 0.05, 260);
   camera.rotation.order = 'YXZ';
   scene.add(camera);
+  const fixed = gfx !== null && gfx !== '', post = createPost(renderer, scene, camera, { level: fixed ? +gfx : low ? 1 : 2, auto: !fixed });
+  post.setStage('eskinita');
+  const pmrem = new THREE.PMREMGenerator(renderer);
 
   // ---------- light: a bright afternoon, turning golden toward six ----------
   const hemi = new THREE.HemisphereLight('#e4f1ff', '#bfae94', 2.0);
@@ -204,16 +215,21 @@ export function createView(canvas, { low = false } = {}) {
   sun.target.position.set(0, 0, -6);
 
   const skyU = { top: { value: new THREE.Color('#5ea8ec') }, mid: { value: new THREE.Color('#a9d4f5') }, low: { value: new THREE.Color('#e8f1f4') }, sunDir: { value: new THREE.Vector3(-0.4, 0.8, -0.45).normalize() }, glow: { value: new THREE.Color('#fff6dc') } };
-  add(new THREE.Mesh(new THREE.SphereGeometry(200, 32, 16), new THREE.ShaderMaterial({
+  const skyMat = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false, uniforms: skyU,
     vertexShader: 'varying vec3 v; void main(){ v = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
     fragmentShader: 'uniform vec3 top; uniform vec3 mid; uniform vec3 low; uniform vec3 sunDir; uniform vec3 glow; varying vec3 v; void main(){ float h = v.y; vec3 c = h > 0.1 ? mix(mid, top, smoothstep(0.1, 0.7, h)) : mix(low, mid, smoothstep(-0.05, 0.1, h)); float s = max(dot(v, sunDir), 0.0); c += glow * (pow(s, 90.0) * 1.4 + pow(s, 8.0) * 0.18); gl_FragColor = vec4(c, 1.0); }',
-  })));
+  });
+  const skyMesh = new THREE.Mesh(new THREE.SphereGeometry(200, 48, 24), skyMat); scene.add(skyMesh);
+  // a photographed sky, once it's loaded, in place of the painted one (and its clouds)
+  const backdropMat = new THREE.MeshBasicMaterial({ side: THREE.BackSide, depthWrite: false, fog: false, toneMapped: false });
+  const cloudGroup = new THREE.Group(); scene.add(cloudGroup);
+  const setBackdrop = (tex, turn = 0, bright = 1) => { backdropMat.map = tex; backdropMat.color.setScalar(bright); backdropMat.needsUpdate = true; skyMesh.material = backdropMat; skyMesh.rotation.y = turn; cloudGroup.visible = false; };
   // puffy clouds, far off
   const cloudM = flat('#ffffff', { emissive: '#eef4fa', emissiveIntensity: 0.55, fog: false, roughness: 1 });
   for (let k = 0; k < 9; k++) {
     const a = -Math.PI / 2 + (rnd() - 0.5) * 2.4, r = 110 + rnd() * 40, cx = Math.cos(a) * r, cz = Math.sin(a) * r, cy = 26 + rnd() * 22;
-    for (let p = 0; p < 4 + Math.floor(rnd() * 3); p++) { const s = 5 + rnd() * 6; const m = mesh(new THREE.IcosahedronGeometry(s, 1), cloudM, { x: cx + (p - 2) * 6 + rnd() * 3, y: cy + rnd() * 3, z: cz + rnd() * 4, cast: false }); m.scale.y = 0.6; add(m); }
+    for (let p = 0; p < 4 + Math.floor(rnd() * 3); p++) { const s = 5 + rnd() * 6; const m = mesh(new THREE.IcosahedronGeometry(s, 1), cloudM, { x: cx + (p - 2) * 6 + rnd() * 3, y: cy + rnd() * 3, z: cz + rnd() * 4, cast: false }); m.scale.y = 0.6; cloudGroup.add(m); }
   }
 
   // ---------- the ground: a concrete eskinita, a cross street at the far end ----------
@@ -237,10 +253,10 @@ export function createView(canvas, { low = false } = {}) {
     for (let k = 0; k < 7; k++) { const cx = rnd() * w, cz = rnd() * h; for (let p = 0; p < 30; p++) R(x, 'rgba(60,56,52,0.1)', cx + (rnd() - 0.5) * 14, cz + (rnd() - 0.5) * 8, 2, 2); }
     for (let k = 0; k < 24; k++) R(x, pick(['#e8384f', '#2f6fd6', '#ffd23f', '#e8e8e8']), rnd() * w, rnd() * h);
     for (let k = 0; k < 160; k++) R(x, pick(['#7a9a3a', '#a8883a', '#5a7a2a']), rnd() * w, gz(Z0) + rnd() * 6 * G, 2, 1);
-  });
-  add(mesh(new THREE.PlaneGeometry(GW, Z1 - Z0), new THREE.MeshStandardMaterial({ map: groundTex, roughness: 0.95 }), { rx: -Math.PI / 2, z: (Z0 + Z1) / 2, cast: false, receive: true }));
+  }, { scale: 1 });
+  add(mesh(new THREE.PlaneGeometry(GW, Z1 - Z0), tag(new THREE.MeshStandardMaterial({ map: groundTex, roughness: 0.95 }), 'eskinita', GW, Z1 - Z0), { rx: -Math.PI / 2, z: (Z0 + Z1) / 2, cast: false, receive: true }));
   const asphalt = canvasTex(128, 16, (x, w, h) => { R(x, '#56575a', 0, 0, w, h); for (let k = 0; k < 500; k++) R(x, shade('#56575a', 0.85 + rnd() * 0.3), rnd() * w, rnd() * h); for (let k = 0; k < w; k += 8) R(x, '#e8c84a', k, 8, 4, 1); }, { repeat: [4, 1] });
-  add(mesh(new THREE.PlaneGeometry(90, 6.5), new THREE.MeshStandardMaterial({ map: asphalt, roughness: 0.95 }), { rx: -Math.PI / 2, z: Z0 - 3.25, y: -0.01, cast: false, receive: true }));
+  add(mesh(new THREE.PlaneGeometry(90, 6.5), tag(new THREE.MeshStandardMaterial({ map: asphalt, roughness: 0.95 }), 'asphalt', 90, 6.5), { rx: -Math.PI / 2, z: Z0 - 3.25, y: -0.01, cast: false, receive: true }));
   add(mesh(new THREE.PlaneGeometry(400, 400), mat('#b3ad9e'), { rx: -Math.PI / 2, y: -0.03, cast: false, receive: true }));
   // the chalk: the circle, the line, and a piko
   const CH = 24, CX0 = -7, CX1 = 7, CZ0 = -9, CZ1 = 11.5;
@@ -253,7 +269,7 @@ export function createView(canvas, { low = false } = {}) {
     const sq = (px, pz, n = '') => { for (let t = 0; t < 1; t += 0.02) { R(x, C, cx(px + t), cz(pz), 1, 1); R(x, C, cx(px + t), cz(pz + 1), 1, 1); R(x, C, cx(px), cz(pz + t), 1, 1); R(x, C, cx(px + 1), cz(pz + t), 1, 1); } if (n) { x.font = '700 14px "Baloo 2", system-ui'; x.fillText(n, cx(px + 0.5), cz(pz + 0.65)); } };
     for (let k = 0; k < 3; k++) sq(-6.4, -7 + k, String(k + 1));
     sq(-6.9, -4, '4'); sq(-5.9, -4, '5'); sq(-6.4, -3, '6'); sq(-6.4, -2, 'LANGIT');
-  });
+  }, { scale: 2 });
   const chalk = mesh(new THREE.PlaneGeometry(CX1 - CX0, CZ1 - CZ0), new THREE.MeshStandardMaterial({ map: chalkTex, transparent: true, roughness: 1, polygonOffset: true, polygonOffsetFactor: -2 }), { rx: -Math.PI / 2, y: 0.005, x: (CX0 + CX1) / 2, z: (CZ0 + CZ1) / 2, cast: false, receive: true });
   add(chalk);
 
@@ -262,7 +278,7 @@ export function createView(canvas, { low = false } = {}) {
   const GATES = ['#2e7d4a', '#b8322a', '#2f5fae', '#6a4a8a', '#3a3a3a'];
   const roofSheet = canvasTex(32, 32, (x, w, h) => { for (let k = 0; k < w; k++) R(x, k % 2 ? '#d6d8dc' : '#9ea2aa', k, 0, 1, h); for (let k = 0; k < 18; k++) R(x, 'rgba(170,80,40,0.55)', rnd() * w, rnd() * h, 2 + rnd() * 4, 1 + rnd() * 3); }, { repeat: [6, 3] });
   const rusty = canvasTex(32, 32, (x, w, h) => { for (let k = 0; k < w; k++) R(x, k % 2 ? '#b8764a' : '#8a5236', k, 0, 1, h); for (let k = 0; k < 24; k++) R(x, 'rgba(90,40,20,0.5)', rnd() * w, rnd() * h, 2 + rnd() * 5, 1 + rnd() * 3); }, { repeat: [6, 3] });
-  const sheetM = new THREE.MeshStandardMaterial({ map: roofSheet, roughness: 0.6, metalness: 0.3 }), rustM = new THREE.MeshStandardMaterial({ map: rusty, roughness: 0.6, metalness: 0.3 });
+  const sheetM = tag(new THREE.MeshStandardMaterial({ map: roofSheet, roughness: 0.6, metalness: 0.3 }), 'roof', 8, 5), rustM = new THREE.MeshStandardMaterial({ map: rusty, roughness: 0.6, metalness: 0.3 });
   const grilleTex = canvasTex(16, 16, (x, w, h) => { R(x, '#1e1e1e', 0, 0, w, 1); R(x, '#1e1e1e', 0, h - 2, w, 2); for (let k = 0; k < w; k += 3) R(x, '#1e1e1e', k, 0, 1, h); R(x, '#1e1e1e', 0, 7, w, 1); }, { repeat: [4, 1] });
   const grilleM = new THREE.MeshStandardMaterial({ map: grilleTex, transparent: true, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.6 });
   const tankM = flat('#2f6fd6', { roughness: 0.5 });
@@ -271,8 +287,8 @@ export function createView(canvas, { low = false } = {}) {
   const laundry = [];
   function house(side, z0, wm, o) {
     const d = 7, h1 = 3, h2 = o.h2 || 0, over = o.over || 0, zc = z0 + wm / 2;
-    const base = flat(o.color);
-    const facade = (tex, w, h, x, y) => add(mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 }), { x, y, z: zc, ry: -side * Math.PI / 2, cast: false, receive: true }));
+    const base = wallMat(o.color);
+    const facade = (tex, w, h, x, y) => add(mesh(new THREE.PlaneGeometry(w, h), tag(new THREE.MeshStandardMaterial({ map: tex.map, normalMap: tex.normalMap, roughness: 0.9 }), 'plaster', w, h, { detail: true }), { x, y, z: zc, ry: -side * Math.PI / 2, cast: false, receive: true }));
     const s = { kind: o.kind, color: o.color, trim: o.trim, grille: '#1e1e1e', gate: o.gate, door: o.door, store: o.store, flip: rnd() < 0.5, poster: rnd() < 0.3 };
     add(box(d, h1, wm, base, { x: side * (FRONT + d / 2), y: h1 / 2, z: zc, receive: true }));
     facade(storeyTex(wm, h1, { ...s, floor: 0 }), wm, h1, side * (FRONT - 0.01), h1 / 2);
@@ -280,7 +296,7 @@ export function createView(canvas, { low = false } = {}) {
     if (h2) {
       face = FRONT - over;
       const up = { ...s, kind: o.kind2 || o.kind, color: o.color2 || o.color, floor: 1 };
-      add(box(d, h2, wm, flat(up.color), { x: side * (face + d / 2), y: h1 + h2 / 2, z: zc, receive: true }));
+      add(box(d, h2, wm, wallMat(up.color), { x: side * (face + d / 2), y: h1 + h2 / 2, z: zc, receive: true }));
       facade(storeyTex(wm, h2, up), wm, h2, side * (face - 0.01), h1 + h2 / 2);
       add(box(0.3 + over, 0.16, wm + 0.06, ledgeM, { x: side * (face + (0.3 + over) / 2 - 0.12), y: h1, z: zc }));
       if (o.balcony) {
@@ -324,9 +340,9 @@ export function createView(canvas, { low = false } = {}) {
     const ic = signTex([['ICE CANDY ₱5', 12]], '#f4f1e6', '#2f6fd6', 56, 16);
     add(mesh(new THREE.PlaneGeometry(0.34, 0.1), new THREE.MeshStandardMaterial({ map: ic }), { x: cx - side * 0.185, y: 0.28, z: zc + 1.6, ry: -side * Math.PI / 2, cast: false }));
     for (const dz of [-1.6, -0.9]) chair(side * (FRONT - 0.34), zc + dz, -side * Math.PI / 2 + (rnd() - 0.5) * 0.4);
-    add(box(0.36, 0.42, 1.5, flat('#8a5a2b'), { x: side * (FRONT - 0.3), y: 0.21, z: zc - 2.9 }));
+    add(box(0.36, 0.42, 1.5, standIn(new THREE.MeshStandardMaterial({ color: '#8a5a2b', roughness: 0.8 })), { x: side * (FRONT - 0.3), y: 0.21, z: zc - 2.9 }));
   }
-  const plastic = flat('#f2f2ee', { roughness: 0.5 });
+  const plastic = standIn(new THREE.MeshStandardMaterial({ color: '#f2f2ee', roughness: 0.5 }));
   function chair(x, z, ry) {
     const g = new THREE.Group();
     g.add(box(0.44, 0.05, 0.42, plastic, { y: 0.42 }));
@@ -360,14 +376,16 @@ export function createView(canvas, { low = false } = {}) {
   let fx = -30;
   while (fx < 30) {
     const wm = 5 + Math.floor(rnd() * 4), h = 3 + Math.floor(rnd() * 3) * 2.6, color = pick(WALLS);
-    add(box(wm, h, 6, flat(color), { x: fx + wm / 2, y: h / 2, z: Z0 - 9.5, receive: true }));
-    add(mesh(new THREE.PlaneGeometry(wm, h), new THREE.MeshStandardMaterial({ map: storeyTex(wm, h, { kind: pick(['block', 'plain']), color, trim: '#f6f1e6', grille: '#1e1e1e', gate: pick(GATES), door: 'gate', floor: h > 4 ? 1 : 0 }), roughness: 0.95 }), { x: fx + wm / 2, y: h / 2, z: Z0 - 6.49, cast: false, receive: true }));
+    add(box(wm, h, 6, wallMat(color), { x: fx + wm / 2, y: h / 2, z: Z0 - 9.5, receive: true }));
+    const ft = storeyTex(wm, h, { kind: pick(['block', 'plain']), color, trim: '#f6f1e6', grille: '#1e1e1e', gate: pick(GATES), door: 'gate', floor: h > 4 ? 1 : 0 });
+    add(mesh(new THREE.PlaneGeometry(wm, h), tag(new THREE.MeshStandardMaterial({ map: ft.map, normalMap: ft.normalMap, roughness: 0.9 }), 'plaster', wm, h, { detail: true }), { x: fx + wm / 2, y: h / 2, z: Z0 - 6.49, cast: false, receive: true }));
     fx += wm;
   }
   for (let hx = -FRONT; hx < FRONT; hx += 5.2) {
     const wm = Math.min(5.2, FRONT - hx), color = pick(WALLS);
-    add(box(wm, 5.6, 5, flat(color), { x: hx + wm / 2, y: 2.8, z: Z1 + 2.5, receive: true }));
-    add(mesh(new THREE.PlaneGeometry(wm, 5.6), new THREE.MeshStandardMaterial({ map: storeyTex(wm, 5.6, { kind: 'block', color, trim: '#f6f1e6', grille: '#1e1e1e', gate: pick(GATES), floor: 1 }), roughness: 0.95 }), { x: hx + wm / 2, y: 2.8, z: Z1 - 0.01, ry: Math.PI, cast: false, receive: true }));
+    add(box(wm, 5.6, 5, wallMat(color), { x: hx + wm / 2, y: 2.8, z: Z1 + 2.5, receive: true }));
+    const bt = storeyTex(wm, 5.6, { kind: 'block', color, trim: '#f6f1e6', grille: '#1e1e1e', gate: pick(GATES), floor: 1 });
+    add(mesh(new THREE.PlaneGeometry(wm, 5.6), tag(new THREE.MeshStandardMaterial({ map: bt.map, normalMap: bt.normalMap, roughness: 0.9 }), 'plaster', wm, 5.6, { detail: true }), { x: hx + wm / 2, y: 2.8, z: Z1 - 0.01, ry: Math.PI, cast: false, receive: true }));
   }
 
   // ---------- poles, wires, banderitas and a birthday tarpaulin ----------
@@ -409,9 +427,10 @@ export function createView(canvas, { low = false } = {}) {
   (sag(new THREE.Vector3(-FRONT + 0.2, 5.5, -19.5), new THREE.Vector3(FRONT - 0.2, 5.5, -19.5), 0.25));
 
   // ---------- a mango tree, a basketball ring, a fishball cart, an askal, plants ----------
-  const leafM = [flat('#3f8a35'), flat('#4f9a3f'), flat('#2f7a2f')];
+  const leafM = ['#3f8a35', '#4f9a3f', '#2f7a2f'].map((c) => standIn(new THREE.MeshStandardMaterial({ color: c, roughness: 0.9 })));
+  const trunkM = standIn(new THREE.MeshStandardMaterial({ color: '#6b4a2a', roughness: 0.95 }));
   function tree(x, z, s) {
-    add(mesh(new THREE.CylinderGeometry(0.3 * s, 0.45 * s, 4 * s, 7), flat('#6b4a2a'), { x, y: 2 * s, z }));
+    add(mesh(new THREE.CylinderGeometry(0.3 * s, 0.45 * s, 4 * s, 7), trunkM, { x, y: 2 * s, z }));
     for (let k = 0; k < 7; k++) add(mesh(new THREE.IcosahedronGeometry((1.4 + rnd() * 0.9) * s, 0), pick(leafM), { x: x + (rnd() - 0.5) * 3.2 * s, y: (4.2 + rnd() * 1.8) * s, z: z + (rnd() - 0.5) * 2.4 * s }));
   }
   tree(1.5, Z0 - 13.5, 1.9);
@@ -443,14 +462,14 @@ export function createView(canvas, { low = false } = {}) {
   dog.position.set(-7.1, 0, -11); dog.rotation.y = 0.9;
   scene.add(dog);
   // potted plants, drums of water, and signs on the walls
-  const potC = ['#b8643a', '#2f6fd6', '#e8384f', '#f4f1e6', '#3fae5a'];
+  const potC = ['#b8643a', '#2f6fd6', '#e8384f', '#f4f1e6', '#3fae5a'].map((c) => standIn(new THREE.MeshStandardMaterial({ color: c, roughness: 0.8 })));
   for (let k = 0; k < 22; k++) {
     const side = rnd() < 0.5 ? -1 : 1, z = -24 + rnd() * 46;
     if (side === 1 && z > -5 && z < 2) continue;
     const g = new THREE.Group(), n = 1 + Math.floor(rnd() * 3);
     for (let p = 0; p < n; p++) {
       const pz = p * 0.42, pc = pick(potC), tall = rnd() < 0.3;
-      g.add(mesh(new THREE.CylinderGeometry(0.16, 0.12, 0.26, 8), flat(pc), { y: 0.13, z: pz }));
+      g.add(mesh(new THREE.CylinderGeometry(0.16, 0.12, 0.26, 8), pc, { y: 0.13, z: pz }));
       if (tall) for (let l = 0; l < 5; l++) g.add(mesh(new THREE.ConeGeometry(0.05, 0.6, 4), pick(leafM), { y: 0.5, z: pz + (rnd() - 0.5) * 0.12, x: (rnd() - 0.5) * 0.12, rz: (rnd() - 0.5) * 0.4 }));
       else for (let l = 0; l < 3; l++) g.add(mesh(new THREE.IcosahedronGeometry(0.14 + rnd() * 0.08, 0), pick(leafM), { y: 0.36 + rnd() * 0.1, z: pz + (rnd() - 0.5) * 0.15, x: (rnd() - 0.5) * 0.15 }));
     }
@@ -528,20 +547,45 @@ export function createView(canvas, { low = false } = {}) {
     scene.add(root);
     return { root, body, legL, legR, armL, armR, head, bandana, slipper, tag, tayaTag, ring, phase: Math.random() * TAU };
   }
+  // a rubber tsinelas: a white base under a coloured top, worn where the foot goes, two straps and a toe post
+  const SOLE = new Map();
   function slipperModel(i) {
     const g = new THREE.Group();
     const shape = new THREE.Shape();
     shape.moveTo(0, -0.13); shape.bezierCurveTo(0.07, -0.13, 0.065, 0.02, 0.055, 0.07); shape.bezierCurveTo(0.05, 0.14, -0.05, 0.14, -0.055, 0.07); shape.bezierCurveTo(-0.065, 0.02, -0.07, -0.13, 0, -0.13);
-    const sole = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: 0.024, bevelEnabled: false, curveSegments: 6 }), flat(SLIPPERS[i], { roughness: 0.7 }));
-    sole.rotation.x = -Math.PI / 2; sole.castShadow = true;
-    g.add(sole);
-    const strap = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([new THREE.Vector3(-0.05, 0.026, 0.0), new THREE.Vector3(0, 0.055, -0.07), new THREE.Vector3(0.05, 0.026, 0.0)]), 10, 0.01, 5), flat('#f4f1e6'));
-    strap.castShadow = true;
-    g.add(strap);
+    if (!SOLE.has(i)) {
+      // the top: its colour, a darker footprint worn in, fine rubber grain, the brand pressed in
+      const c = T.paint(128, 256, (x, y) => { const u = (x - 64) / 64, v = (y - 128) / 128, foot = Math.exp(-((u * 1.6) ** 2 + ((v + 0.15) * 1.1) ** 2) * 2), heel = Math.exp(-((u * 1.8) ** 2 + ((v - 0.55) * 3) ** 2) * 2); const [r0, g0, b0] = [parseInt(SLIPPERS[i].slice(1, 3), 16), parseInt(SLIPPERS[i].slice(3, 5), 16), parseInt(SLIPPERS[i].slice(5, 7), 16)], k = 1 - (foot * 0.28 + heel * 0.22) + (Math.random() - 0.5) * 0.06; return [r0 * k, g0 * k, b0 * k, (Math.random() - 0.5) * 0.4]; }, { strength: 1.5 });
+      const cx = c.canvas.getContext('2d'); cx.save(); cx.translate(64, 60); cx.rotate(-Math.PI / 2); cx.fillStyle = 'rgba(0,0,0,0.18)'; cx.font = 'italic 800 20px "Baloo 2", sans-serif'; cx.textAlign = 'center'; cx.fillText('SPARTAN', 0, 7); cx.restore(); c.map.needsUpdate = true;
+      for (const t2 of [c.map, c.normalMap]) { t2.repeat.set(1 / 0.14, 1 / 0.27); t2.offset.set(0.5, 0.48); }
+      SOLE.set(i, { top: new THREE.MeshStandardMaterial({ map: c.map, normalMap: c.normalMap, roughness: 0.72 }), base: new THREE.MeshStandardMaterial({ color: '#ecebe4', roughness: 0.8 }), strap: new THREE.MeshStandardMaterial({ color: T.shade(SLIPPERS[i], 0.85), roughness: 0.55 }) });
+    }
+    const M = SOLE.get(i);
+    const layer = (depth, mat, y) => { const m = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: true, bevelThickness: 0.003, bevelSize: 0.003, bevelSegments: 2, curveSegments: 10 }), mat); m.rotation.x = -Math.PI / 2; m.position.y = y; m.castShadow = true; m.receiveShadow = true; g.add(m); return m; };
+    layer(0.011, M.base, 0); layer(0.011, M.top, 0.012);
+    const strap = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([new THREE.Vector3(-0.052, 0.026, 0.0), new THREE.Vector3(-0.02, 0.052, -0.05), new THREE.Vector3(0, 0.03, -0.085), new THREE.Vector3(0.02, 0.052, -0.05), new THREE.Vector3(0.052, 0.026, 0.0)]), 16, 0.009, 8), M.strap);
+    strap.castShadow = true; g.add(strap);
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.008, 0.02, 8), M.strap); post.position.set(0, 0.03, -0.085); g.add(post);
     return g;
   }
   const kids = new Map();
   const slippers = new Map();
+
+  // the real kids, once they've loaded (people.mjs); the simple ones above until then
+  let people = null, env = null, onlookers = null, cheerT = 0;
+  function badges(k, root, h) {
+    const tag = label(k.you ? 'IKAW' : k.name, k.you ? '#ffd23f' : '#fff8e1'); tag.position.y = h + 0.3; root.add(tag);
+    const tayaTag = label('TAYA', '#fff', '#e8384f', 0.8); tayaTag.position.y = h + 0.52; root.add(tayaTag);
+    const ring = mesh(new THREE.RingGeometry(0.38, 0.48, 28), new THREE.MeshBasicMaterial({ color: k.you ? '#ffd23f' : '#e8384f', transparent: true, opacity: 0.75, depthWrite: false }), { rx: -Math.PI / 2, y: 0.02, cast: false });
+    root.add(ring);
+    return { tag, tayaTag, ring };
+  }
+  function realKid(k) {
+    const sl = slipperModel(k.i), m = personModel(people, k.i, scene, { slipper: sl });
+    if (!m) return null;
+    Object.assign(m, badges(k, m.root, m.cast.h), { real: true, tagY: m.cast.h + 0.3 });
+    return m;
+  }
 
   // ---------- the lata ----------
   const labelTex = canvasTex(64, 32, (c, w, h) => {
@@ -591,6 +635,15 @@ export function createView(canvas, { low = false } = {}) {
   fpR.fore.add(fpSlip); fpSlip.position.set(0, 0.03, -0.26); fpSlip.rotation.set(Math.PI / 2 - 0.25, 0, 0.12);
   const fpCan = new THREE.Mesh(canMesh.geometry, canMats); fpCan.scale.setScalar(1.25); fp.add(fpCan); fpCan.position.set(0, -0.2, -0.5);
   const fpState = { phase: 0, dip: 0, aimT: 0 };
+  // with a real body, the slipper you hold shows in the corner of your eye, the way games show what's in hand
+  const fpHeld = slipperModel(0); fpHeld.scale.setScalar(1.5); fpHeld.traverse((q) => { q.castShadow = false; }); camera.add(fpHeld); fpHeld.visible = false;
+  function held(me, o, dt) {
+    const run = clamp(me.speed / 5, 0, 1.2), bob = o.reduced ? 0 : Math.sin(fpState.phase) * 0.03 * run;
+    fpState.phase += dt * (4 + me.speed * 2.2);
+    const a = fpState.aimT = o.aim ? Math.min(1, fpState.aimT + dt * 6) : Math.max(0, fpState.aimT - dt * 8);
+    fpHeld.position.set(lerp(0.3, 0.36, a), lerp(-0.34, -0.22, a) + bob, lerp(-0.62, -0.7, a));
+    fpHeld.rotation.set(lerp(1.2, 0.5, a), lerp(-0.4, -0.2, a), lerp(0.25, 0.6, a));
+  }
   const pose = (arm, px, py, pz, rx, ry, rz, k) => { arm.g.position.x = lerp(arm.g.position.x, px, k); arm.g.position.y = lerp(arm.g.position.y, py, k); arm.g.position.z = lerp(arm.g.position.z, pz, k); arm.fore.rotation.x = lerp(arm.fore.rotation.x, rx, k); arm.fore.rotation.y = lerp(arm.fore.rotation.y, ry, k); arm.fore.rotation.z = lerp(arm.fore.rotation.z, rz, k); };
 
   function hands(g, me, o, dt, t) {
@@ -635,6 +688,7 @@ export function createView(canvas, { low = false } = {}) {
     renderer.setSize(Math.max(1, r.width), Math.max(1, r.height), false);
     camera.aspect = Math.max(0.3, r.width / Math.max(1, r.height));
     camera.updateProjectionMatrix();
+    post.resize();
   }
 
   // The flat directions the camera is looking along, for turning stick input into world moves.
@@ -655,6 +709,10 @@ export function createView(canvas, { low = false } = {}) {
       case 'pickup': if (k) { emit(k.x, 0.3, k.z, '#7cf29a', 8, 1.2, 1.5, 0.5); if (k.you) fpState.dip = 1; } break;
       default: break;
     }
+    // the real kids react: bending for a slipper, sulking when tagged, cheering a knock
+    if (e.type === 'pickup') personEvent(kids.get(e.kid), 'pickup');
+    if (e.type === 'tag') personEvent(kids.get(e.kid), 'sulk');
+    if (e.type === 'knock') { cheerT = 2.2; for (const kk of g.kids) if (kk.role === 'thrower' && isHome(kk)) personEvent(kids.get(kk.i), 'cheer'); }
   }
 
   // ---------- each frame ----------
@@ -683,12 +741,24 @@ export function createView(canvas, { low = false } = {}) {
     const me = g.kids.find((k) => k.you);
     const fpNow = o.mode === 'play' && o.view !== 'chase' && !!me;
     cam.firstPerson = fpNow;
-    fp.visible = fpNow;
+    const realMe = !!(me && kids.get(me.i) && kids.get(me.i).real);
+    fp.visible = fpNow && !realMe; // with a real body, your own arms are what you see
     // the kids
     const ta = taya(g);
     for (const k of g.kids) {
       let m = kids.get(k.i);
-      if (!m) { m = kidModel(k); kids.set(k.i, m); }
+      if (m && people && !m.real) { scene.remove(m.root); m = null; }
+      if (!m) { m = (people && realKid(k)) || kidModel(k); kids.set(k.i, m); }
+      if (m.real) {
+        drivePerson(m, k, g, people, dt, { yaw: k.you && fpNow ? o.camYaw : k.you && o.aim ? o.aim.yaw : k.yaw, aiming: !!(o.aim && k.you), firstPerson: fpNow && k.you });
+        const tayaNow = k.role === 'taya', near = fpNow && Math.hypot(k.x - me.x, k.z - me.z) < 2.4;
+        m.tayaTag.visible = tayaNow && !near && !(fpNow && k.you); m.tayaTag.position.y = m.tagY + 0.22 + Math.sin(t * 4) * 0.05;
+        m.tag.visible = !tayaNow && !(k.you && o.mode === 'play') && !near;
+        m.ring.visible = (k.you && !fpNow) || tayaNow;
+        m.ring.material.color.set(tayaNow ? '#e8384f' : '#ffd23f');
+        m.ring.scale.setScalar(tayaNow && k.count > 0 ? 1 + Math.sin(t * 12) * 0.15 : 1);
+        continue;
+      }
       m.root.visible = !(fpNow && k.you);
       m.root.position.set(k.x, 0, k.z);
       let yaw = k.yaw;
@@ -731,10 +801,12 @@ export function createView(canvas, { low = false } = {}) {
     }
     // the can (hidden in the world while it's in your own hands)
     const c = g.can;
-    canGroup.visible = !(fpNow && c.state === 'carried' && ta === me);
+    const carrier = c.state === 'carried' && ta ? kids.get(ta.i) : null;
+    canGroup.visible = !(fpNow && c.state === 'carried' && ta === me && !realMe);
     canGroup.position.set(c.x, c.y + (c.tilt > 0.5 ? CAN.r : CAN.h / 2), c.z);
     const dir = Math.atan2(c.vx || 0.001, c.vz || 0.001);
-    if (c.state === 'up' || c.state === 'carried') { canGroup.rotation.set(0, 0, 0); canMesh.rotation.set(0, 0, 0); }
+    if (carrier && carrier.real) { handsOf(carrier, canGroup.position); canGroup.rotation.set(0, carrier.yaw, 0); canMesh.rotation.set(0, 0, 0); }
+    else if (c.state === 'up' || c.state === 'carried') { canGroup.rotation.set(0, 0, 0); canMesh.rotation.set(0, 0, 0); }
     else { canGroup.rotation.set(0, dir, 0); canMesh.rotation.set(c.tilt, 0, 0); canMesh.rotateY(c.roll); }
     // the throw preview
     if (o.aim && o.preview > 0) {
@@ -765,16 +837,26 @@ export function createView(canvas, { low = false } = {}) {
     cam.shake = Math.max(0, cam.shake - dt * 0.8);
     const fov = camera.aspect < 0.8 ? (fpNow ? 84 : 70) : fpNow ? 72 : 58;
     if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
+    fpHeld.visible = false;
     if (fpNow) {
       // first person: your eyes, bobbing as you run, ducking when you dive
       const run = clamp(me.speed / 5, 0, 1.2);
       let y = EYE + (o.reduced ? 0 : Math.abs(Math.sin(fpState.phase)) * 0.05 * run), pitch = o.camPitch || 0;
       if (me.dive > 0) { y = 0.6; pitch -= 0.2; } else if (me.recover > 0) y = 0.95;
       if (me.anim.tagT > 0) y -= Math.sin((1 - me.anim.tagT) * Math.PI) * 0.25;
-      camera.position.set(me.x + (Math.random() - 0.5) * shake, y + (Math.random() - 0.5) * shake, me.z);
-      camera.rotation.set(pitch, o.camYaw + Math.PI, 0);
+      fpHeld.visible = realMe && me.role === 'thrower' && me.hasSlip && !(me.anim.throwT > 0);
+      if (realMe) {
+        held(me, o, dt);
+        // inside your own body: the eyes of the head you can't see, a touch forward of it
+        eyesOf(kids.get(me.i), tmp);
+        camera.position.set(tmp.x + Math.sin(o.camYaw) * 0.08 + (Math.random() - 0.5) * shake, tmp.y + (Math.random() - 0.5) * shake, tmp.z + Math.cos(o.camYaw) * 0.08);
+        camera.rotation.set(pitch, o.camYaw + Math.PI, 0);
+      } else {
+        camera.position.set(me.x + (Math.random() - 0.5) * shake, y + (Math.random() - 0.5) * shake, me.z);
+        camera.rotation.set(pitch, o.camYaw + Math.PI, 0);
+        hands(g, me, o, dt, t);
+      }
       cam.pos.copy(camera.position);
-      hands(g, me, o, dt, t);
     } else {
       if (o.mode === 'play' && me) {
         // the chase camera: behind you, turning toward the can unless you've turned it yourself
@@ -797,7 +879,10 @@ export function createView(canvas, { low = false } = {}) {
       camera.position.x += (Math.random() - 0.5) * shake; camera.position.y += (Math.random() - 0.5) * shake;
       camera.lookAt(cam.look);
     }
-    renderer.render(scene, camera);
+    if (debug.cam) { camera.position.set(...debug.cam.slice(0, 3)); camera.lookAt(...debug.cam.slice(3, 6)); } // for checking the street up close
+    cheerT = Math.max(0, cheerT - dt);
+    if (onlookers) onlookers.update(t, cheerT > 0 ? 1 : 0);
+    post.render(dt);
   }
 
   // The yaw the camera should settle to: looking from you toward the can (or, as taya, toward the kids).
@@ -820,8 +905,37 @@ export function createView(canvas, { low = false } = {}) {
   add(new THREE.LineSegments(wireGeo, wireM));
   mergeStatic(world);
 
+  // ---------- the real things, as they load ----------
+  function setPeople(lib) { people = lib; }
+  function setEnv(e) {
+    env = e;
+    const ctx = { pmrem, current: () => true, setEnvironment(tex, power, turn) { scene.environment = tex; scene.environmentIntensity = power; scene.environmentRotation.set(0, turn, 0); }, setBackdrop };
+    return dress(env, 'eskinita', { group: world }, ctx).then(async () => {
+      // the lata: a real rusted tin
+      const info = env.index.props.can_rusted;
+      if (!info) return;
+      const tin = (await new GLTFLoader().loadAsync(env.base + 'props/can_rusted.glb')).scene, k = CAN.h / info.size[1];
+      tin.scale.setScalar(k); tin.position.y = -CAN.h / 2; tin.traverse((q) => { if (q.isMesh) { q.castShadow = true; q.receiveShadow = true; } });
+      canMesh.add(tin); for (const m2 of canMats) m2.visible = false;
+    }).catch(() => { /* the painted street stays */ });
+  }
+  // the neighbours watching: on the store's chairs and bench, at their gates, by the fishball cart
+  function setCrowd(lib) {
+    const R2 = Math.PI / 2;
+    const spots = [
+      { x: 7.1, y: 0.45, z: -5.5, stand: false, face: -R2 + 0.3 }, { x: 7.05, y: 0.45, z: -4.7, stand: false, face: -R2 - 0.2 }, { x: 7.3, y: 0.42, z: -2.6, stand: false, face: -R2 },
+      { x: 7.2, y: 0, z: -1.9, stand: true, face: -R2 + 0.4 }, { x: -7.1, y: 0, z: 9.6, stand: true, face: R2 - 0.5 }, { x: -7.15, y: 0.44, z: 8.8, stand: false, face: R2 - 0.3 },
+      { x: 6.9, y: 0, z: 14.2, stand: true, face: -R2 - 0.6 }, { x: -6.9, y: 0, z: -15.4, stand: true, face: R2 + 0.4 }, { x: 4.9, y: 0, z: -12.0, stand: true, face: -2.6 },
+      { x: -2.8, y: 0, z: -22.5, stand: true, face: 0.1 }, { x: 3.4, y: 0, z: -23, stand: true, face: -0.2 }, { x: -7.0, y: 0, z: 2.2, stand: true, face: R2 },
+    ];
+    let q = 5; const rnd2 = () => ((q = (q * 16807) % 2147483647) / 2147483647);
+    onlookers = buildCrowd(lib, spots, rnd2);
+    scene.add(onlookers.group);
+  }
+
   resize();
-  return { frame, resize, event, basis, autoYaw, cam, renderer };
+  const debug = { cam: null };
+  return { frame, resize, event, basis, autoYaw, cam, renderer, post, scene, setPeople, setEnv, setCrowd, debug, get people() { return people; } };
 }
 
 function lerpAngle(a, b, k) {

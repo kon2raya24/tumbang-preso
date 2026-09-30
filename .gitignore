@@ -1,2 +1,5 @@
 .vercel
 .scratch
+# the Mixamo kids and the Poly Haven street: shipped inside the Vercel deploy, not in the repo
+assets/people/
+assets/env/

@@ -17,7 +17,7 @@
 <meta name="apple-mobile-web-app-title" content="Tumbang Preso">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Barlow+Condensed:ital,wght@0,700;0,800;1,800;1,900&display=swap" rel="stylesheet">
 <style>
 :root { --ink: #fff8e1; --muted: #e8d8c8; --gold: #ffd23f; --red: #e8384f; --pink: #ff8ae2; color-scheme: dark; }
 * { box-sizing: border-box; }
@@ -28,26 +28,27 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #2a1d2a; col
 /* the HUD */
 #hud { position: absolute; inset: 0; pointer-events: none; }
 .hud-top { position: absolute; top: max(10px, env(safe-area-inset-top)); left: 12px; right: 12px; display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
-.chip { background: rgba(20, 14, 24, .62); border: 2px solid rgba(255, 210, 63, .35); border-radius: 14px; padding: 4px 12px; backdrop-filter: blur(4px); }
-.chip small { display: block; font-size: 11px; letter-spacing: .08em; color: var(--muted); line-height: 1.1; }
-.chip b { font-size: 22px; line-height: 1.1; color: var(--gold); }
+.chip { background: linear-gradient(180deg, rgba(34,24,42,.88), rgba(14,10,18,.88)); border: 2px solid #d8c9a0; box-shadow: 0 0 0 2px #120d14, 0 6px 14px rgba(0,0,0,.4); padding: 5px 16px 4px; clip-path: polygon(0 0, 100% 0, calc(100% - 10px) 100%, 0 100%); font-family: "Barlow Condensed", "Baloo 2", sans-serif; }
+.hud-top .chip:last-child { clip-path: polygon(10px 0, 100% 0, 100% 100%, 0 100%); }
+.chip small { display: block; font: italic 800 11px/1.1 "Barlow Condensed", sans-serif; letter-spacing: .18em; color: var(--muted); }
+.chip b { font: italic 900 26px/1.05 "Barlow Condensed", sans-serif; background: linear-gradient(180deg, #fffbe0, #ffd23f 50%, #e8741c); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
 #clock.late { color: #ff8a6a; }
-#role { font-weight: 800; font-size: 15px; letter-spacing: .04em; }
-#role.taya { background: rgba(232, 56, 79, .85); border-color: #ffb3b3; }
-#prompt { position: absolute; left: 50%; bottom: calc(max(14px, env(safe-area-inset-bottom)) + 8px); transform: translateX(-50%); background: rgba(20, 14, 24, .62); border-radius: 12px; padding: 5px 14px; font-weight: 700; font-size: 15px; text-align: center; max-width: 92vw; }
+#role { font: italic 900 17px/1.4 "Barlow Condensed", sans-serif; letter-spacing: .14em; }
+#role.taya { background: linear-gradient(180deg, #ff6a5a, #b8121e); border-color: #ffd0c8; }
+#prompt { position: absolute; left: 50%; bottom: calc(max(14px, env(safe-area-inset-bottom)) + 8px); transform: translateX(-50%); background: linear-gradient(90deg, transparent, rgba(14,10,18,.8) 12%, rgba(14,10,18,.8) 88%, transparent); padding: 6px 34px; font: italic 800 16px/1.3 "Barlow Condensed", sans-serif; letter-spacing: .04em; text-align: center; max-width: 92vw; }
 #prompt:empty { display: none; }
 body.touch #prompt { bottom: 150px; font-size: 13px; }
-#meter { position: absolute; left: 50%; bottom: 76px; transform: translateX(-50%); width: min(70vw, 360px); height: 22px; border-radius: 11px; background: rgba(20, 14, 24, .7); border: 2px solid rgba(255,255,255,.4); overflow: hidden; }
+#meter { position: absolute; left: 50%; bottom: 76px; transform: translateX(-50%) skewX(-12deg); width: min(70vw, 380px); height: 20px; background: linear-gradient(180deg, #0e0a12, #221a2a); border: 2px solid #d8c9a0; box-shadow: 0 0 0 2px #120d14, 0 0 16px rgba(255,200,60,.35); overflow: hidden; }
 body.touch #meter { bottom: 196px; }
-#meter-fill { height: 100%; width: 0; background: linear-gradient(90deg, #7cf29a, #ffd23f 60%, #e8384f); }
+#meter-fill { height: 100%; width: 0; background: linear-gradient(90deg, #7cf29a, #ffd23f 60%, #e8384f); box-shadow: inset 0 6px 6px rgba(255,255,255,.35); }
 #meter-sweet { position: absolute; top: -2px; bottom: -2px; width: 4px; margin-left: -2px; background: #fff; box-shadow: 0 0 6px #fff; }
 #cross { position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border: 2px solid rgba(255,255,255,.85); border-radius: 50%; box-shadow: 0 0 0 1px rgba(0,0,0,.35); }
 #cross::after { content: ""; position: absolute; left: 4px; top: 4px; width: 2px; height: 2px; background: #fff; border-radius: 1px; }
 #toast { position: absolute; left: 50%; top: 24%; transform: translateX(-50%); text-align: center; pointer-events: none; text-shadow: 0 3px 0 rgba(0,0,0,.5), 0 0 18px rgba(0,0,0,.35); }
-#toast b { display: block; font-size: clamp(30px, 8vw, 56px); line-height: 1; color: var(--gold); }
-#toast span { display: block; font-size: clamp(15px, 3.6vw, 20px); font-weight: 700; margin-top: 6px; }
-#toast.pop { animation: pop .35s ease-out; }
-@keyframes pop { from { transform: translateX(-50%) scale(.6); opacity: 0; } }
+#toast b { display: block; font: italic 900 clamp(40px, 10vw, 84px)/.9 "Barlow Condensed", sans-serif; text-transform: uppercase; background: linear-gradient(180deg, #fffbe0 0%, #ffd23f 42%, #e8741c 58%, #fff0b0 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; filter: drop-shadow(0 5px 0 #120d14) drop-shadow(0 0 24px rgba(255,140,40,.5)); }
+#toast span { display: block; font: italic 800 clamp(16px, 3.6vw, 24px)/1 "Barlow Condensed", sans-serif; letter-spacing: .12em; margin-top: 8px; color: #fff; }
+#toast.pop { animation: pop .42s cubic-bezier(.2,1.4,.4,1); }
+@keyframes pop { from { transform: translateX(-50%) scale(2) skewX(-12deg); opacity: 0; filter: blur(4px); } }
 /* touch controls */
 #stick { position: absolute; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.35); pointer-events: none; }
 #knob { position: absolute; left: 34px; top: 34px; width: 52px; height: 52px; border-radius: 50%; background: rgba(255, 210, 63, .8); }
@@ -60,25 +61,30 @@ body.touch.playing .tbtns { display: flex; }
 .corner button { background: rgba(20,14,24,.6); color: var(--ink); border: 2px solid rgba(255,255,255,.3); border-radius: 10px; font: 700 13px "Baloo 2", system-ui; padding: 2px 10px; min-height: 30px; }
 /* screens */
 .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: safe center; gap: 10px; padding: 20px 16px; text-align: center; background: radial-gradient(ellipse at 50% 45%, rgba(20,14,24,.05), rgba(20,14,24,.5)); overflow-y: auto; }
-.logo { margin: 0; font-size: clamp(44px, 11vw, 88px); line-height: .9; font-weight: 800; color: var(--gold); -webkit-text-stroke: 3px #2a1a14; paint-order: stroke fill; text-shadow: 0 6px 0 #a3311f, 0 8px 0 #2a1a14; }
-.logo small { display: block; margin-top: 10px; font-size: .3em; color: #fff; text-shadow: 0 2px 0 rgba(0,0,0,.4); letter-spacing: .08em; }
+.logo { margin: 0; font: italic 900 clamp(58px, 13vw, 128px)/.82 "Barlow Condensed", "Baloo 2", sans-serif; background: linear-gradient(180deg, #fffbe0 0%, #ffd23f 40%, #e8741c 56%, #fff0b0 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; filter: drop-shadow(0 6px 0 #120d14) drop-shadow(0 0 34px rgba(255,120,40,.5)); }
+.logo small { display: block; margin-top: 18px; font-size: .22em; letter-spacing: .16em; -webkit-text-fill-color: #fff; background: none; }
+#loading { position: fixed; left: 50%; bottom: calc(max(14px, env(safe-area-inset-bottom)) + 34px); transform: translateX(-50%); width: min(420px, 80vw); z-index: 5; pointer-events: none; font: italic 800 13px/1 "Barlow Condensed", sans-serif; letter-spacing: .12em; text-transform: uppercase; color: #e8d8c8; text-align: center; text-shadow: 0 1px 2px #000; transition: opacity .6s; }
+#loading i { display: block; height: 4px; margin-top: 6px; background: linear-gradient(90deg, #ffd23f var(--p, 0%), rgba(255,255,255,.15) var(--p, 0%)); box-shadow: 0 0 10px rgba(255,200,60,.4); }
+#loading.done { opacity: 0; }
 .tag { margin: 0; color: var(--ink); max-width: 32em; background: rgba(20,14,24,.55); border-radius: 12px; padding: 6px 12px; }
-h2 { margin: 0; font-size: clamp(24px, 6vw, 36px); color: var(--gold); }
+h2 { margin: 0; font: italic 900 clamp(28px, 6.5vw, 46px)/1 "Barlow Condensed", "Baloo 2", sans-serif; text-transform: uppercase; background: linear-gradient(180deg, #fffbe0, #ffd23f 50%, #e8741c); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; filter: drop-shadow(0 3px 0 #120d14); }
 .row, .modes { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
-button { font: inherit; font-weight: 700; color: var(--ink); background: #3aa0d8; border: 3px solid #1e1a22; border-radius: 12px; padding: 8px 18px; cursor: pointer; min-height: 44px; box-shadow: 0 4px 0 #1e1a22; }
-button:focus-visible { outline: 3px solid var(--pink); outline-offset: 2px; }
-button.primary { background: var(--gold); color: #2a1a0a; box-shadow: 0 5px 0 #1e1a22; font-size: 18px; }
+button { font: italic 800 17px/1 "Barlow Condensed", "Baloo 2", system-ui, sans-serif; letter-spacing: .06em; text-transform: uppercase; color: var(--ink); background: linear-gradient(180deg, rgba(58,44,70,.92), rgba(24,16,30,.92)); border: 2px solid #d8c9a0; border-radius: 3px; padding: 10px 22px; cursor: pointer; min-height: 44px; box-shadow: 0 0 0 2px #120d14, 0 6px 14px rgba(0,0,0,.45); transform: skewX(-10deg); transition: filter .12s, box-shadow .12s; }
+button:hover { filter: brightness(1.2); box-shadow: 0 0 0 2px #120d14, 0 0 16px rgba(255,200,80,.45); }
+button:focus-visible { outline: 3px solid #ffd23f; outline-offset: 3px; }
+button.primary { background: linear-gradient(180deg, #fff0a0, #ffd23f 45%, #e89a1c); color: #2a1a0a; font-size: 19px; border-color: #fff4c8; }
+.tbtns button, .corner button { transform: none; }
 .modes button { min-height: 38px; padding: 4px 14px; font-size: 15px; }
-.modes button[aria-pressed=true] { background: var(--red); border-color: #ffb3b3; }
+.modes button[aria-pressed=true] { background: linear-gradient(180deg, #ff7a6a, #c0182e); border-color: #ffd0c8; }
 .sound { min-width: 44px; padding: 6px 10px; font-size: 18px; }
 .calm { font-size: 13px; min-height: 34px; padding: 2px 12px; }
 .muted { color: var(--ink); margin: 0; font-size: 14px; text-shadow: 0 1px 2px rgba(0,0,0,.8), 0 0 6px rgba(0,0,0,.5); }
-.card { background: rgba(20, 14, 24, .82); border: 2px solid rgba(255,210,63,.4); border-radius: 16px; padding: 14px 18px; max-width: 520px; text-align: left; }
+.card { background: linear-gradient(180deg, rgba(34,24,42,.9), rgba(16,10,20,.92)); border: 1px solid rgba(216,201,160,.6); border-radius: 4px; padding: 14px 18px; max-width: 520px; text-align: left; box-shadow: 0 0 0 2px #120d14, 0 10px 30px rgba(0,0,0,.5); backdrop-filter: blur(6px); }
 .card ol { margin: 6px 0; padding-left: 20px; }
 .card li { margin: 4px 0; }
 .keys { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-size: 14px; }
 kbd { background: #3a2a3a; border: 1px solid #6a5a6a; border-radius: 4px; padding: 0 6px; font: 12px ui-monospace, monospace; }
-.score { font-size: clamp(48px, 12vw, 72px); font-weight: 800; color: var(--gold); line-height: 1; }
+.score { font: italic 900 clamp(60px, 14vw, 110px)/1 "Barlow Condensed", sans-serif; background: linear-gradient(180deg, #fffbe0, #ffd23f 50%, #e8741c); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; filter: drop-shadow(0 5px 0 #120d14); }
 .new { color: var(--pink); font-weight: 800; }
 table { border-collapse: collapse; font-size: 14px; }
 th, td { padding: 3px 10px; text-align: center; }
@@ -92,7 +98,8 @@ body.playing .help { display: none; }
 </head>
 <body>
 <main class="stage" id="stage">
-  <canvas id="view" aria-label="A sunny barangay eskinita: kids play tumbang preso around a sardinas can"></canvas>
+  <div id="loading" hidden>Naglo-load ang barkada · <span id="load-pct">0%</span><i></i></div>
+  <canvas id="view" aria-label="A barangay eskinita in the afternoon: teenagers play tumbang preso around a rusty tin can while the neighbours watch"></canvas>
 
   <div id="hud" hidden>
     <div class="hud-top">

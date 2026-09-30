@@ -2,6 +2,9 @@
 // and saves. The rules live in sim.mjs and the street in view3d.mjs.
 import { createGame, step, you, taya, isHome, slipOf, yawTo, powerFor, taggable, DIFFICULTY, NOINPUT } from './sim.mjs';
 import { createView } from './view3d.mjs';
+import { loadPeople } from './people.mjs';
+import { loadCrowd } from './crowd.mjs';
+import { loadEnv } from './envpack.mjs';
 import { createAudio } from './audio.mjs';
 
 const Q = new URLSearchParams(location.search);
@@ -340,7 +343,7 @@ function frame(now) {
 async function boot() {
   // the canvas labels need the webfont
   try { await Promise.race([document.fonts.load('800 34px "Baloo 2"'), new Promise((r) => setTimeout(r, 1500))]); } catch { /* fall back to system fonts */ }
-  try { view = createView($('view'), { low: touch }); }
+  try { view = createView($('view'), { low: touch, gfx: Q.get('gfx') }); }
   catch {
     $('title').innerHTML = '<h1 class="logo">TUMBANG PRESO</h1><p class="tag">Kailangan ng laro ang 3D (WebGL), pero hindi ito mabuksan sa browser na ito. Subukan sa Chrome, Edge, Safari o Firefox, o i-on ang hardware acceleration.</p>';
     show('title');
@@ -349,6 +352,13 @@ async function boot() {
   window.addEventListener('resize', () => view.resize());
   new ResizeObserver(() => view.resize()).observe($('view'));
   show('title');
+  // the real street and the real barkada load in the background; a bar shows how far along
+  const bar = $('loading'), pct = $('load-pct');
+  const loaded = (f) => { if (!bar) return; bar.hidden = false; pct.textContent = `${Math.round(f * 100)}%`; bar.style.setProperty('--p', `${Math.round(f * 100)}%`); };
+  const doneLoading = () => { if (!bar) return; bar.classList.add('done'); setTimeout(() => { bar.hidden = true; }, 700); };
+  loadEnv(Q.get('env') || 'assets/env/').then((e) => view.setEnv(e)).catch(() => { /* the painted street stays */ });
+  loadPeople(Q.get('people') || 'assets/people/', loaded).then((lib) => { view.setPeople(lib); doneLoading(); }).catch(() => doneLoading());
+  loadCrowd(Q.get('people') || 'assets/people/').then((c) => view.setCrowd(c)).catch(() => { /* no neighbours watching, then */ });
   requestAnimationFrame(frame);
   if (TEST) {
     window.__tp = { get game() { return game; }, get mode() { return mode; }, get aim() { return aim; }, cam, start, view, toggleView, press(code) { keys.add(code); if (ACT.includes(code)) pressedAct = true; }, release(code) { keys.delete(code); } };
