@@ -735,7 +735,7 @@ export function createView(canvas, { low = false, gfx = null } = {}) {
     }
     // the real kids react: bending for a slipper, sulking when tagged, cheering a knock
     if (e.type === 'pickup') personEvent(kids.get(e.kid), 'pickup');
-    if (e.type === 'tag') { personEvent(kids.get(e.kid), 'sulk'); personEvent(kids.get(e.taya), 'cheer', 'taunt'); }
+    if (e.type === 'tag') { personEvent(kids.get(e.kid), 'sulk'); personEvent(kids.get(e.taya), 'cheer', 'jump'); }
     if (e.type === 'knock') {
       cheerT = 2.2;
       for (const kk of g.kids) if (kk.role === 'thrower' && isHome(kk) && kk.i !== e.kid) personEvent(kids.get(kk.i), 'cheer');

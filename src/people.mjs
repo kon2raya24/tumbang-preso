@@ -28,11 +28,10 @@ const SLOTS = {
   cheer: [[/^cheering$/i, /victory/i], ['idle']],
   victory: [[/^victory$/i], ['cheer']],
   jump: [[/^jump$/i], ['cheer']],
-  taunt: [[/^taunt$/i], ['cheer']],
   hit: [[/head hit/i, /hit/i], ['sad']],
 };
 // the reactions that play once: which part of the clip, over how long
-const REACT = { jump: [0, 1, 0.93], victory: [0.04, 0.62, 2.3], taunt: [0, 1, 1.63], hit: [0.06, 0.62, 0.6] };
+const REACT = { jump: [0, 1, 0.93], victory: [0.04, 0.62, 2.3], hit: [0.06, 0.62, 0.6] };
 const CHEERS = ['cheer', 'jump', 'victory'];
 // who plays whom, and how tall
 export const CAST = [
@@ -112,7 +111,7 @@ export function personModel(lib, index, scene, { slipper = null, bandana = true 
 }
 
 // a moment the view saw happen: these play once over what the game is doing
-// `cheer` takes a kind ('cheer', 'jump', 'victory' or 'taunt'), or picks one
+// `cheer` takes a kind ('cheer', 'jump' or 'victory'), or picks one
 export function personEvent(m, type, kind = null) {
   if (!m) return;
   if (type === 'pickup') m.pickT = 0.7;
